@@ -137,27 +137,29 @@ func (u *Updater) Loop(onNew func(Status)) {
 	}
 }
 
-// the release file for this system: a running AppImage updates to the AppImage
+// the release file for this system: a running AppImage updates to the AppImage. A Mac build is
+// named .command (Finder would take the version's dot for an extension and call it a document);
+// the plain name is the fallback releases also carry.
 func pick(assets []asset) *asset {
-	var suffix string
+	var suffixes []string
 	switch {
 	case runtime.GOOS == "windows" && runtime.GOARCH == "amd64":
-		suffix = ".exe"
+		suffixes = []string{".exe"}
 	case runtime.GOOS == "darwin" && runtime.GOARCH == "arm64":
-		suffix = "-macos-arm64"
+		suffixes = []string{"-macos-arm64.command", "-macos-arm64"}
 	case runtime.GOOS == "darwin" && runtime.GOARCH == "amd64":
-		suffix = "-macos-intel"
+		suffixes = []string{"-macos-intel.command", "-macos-intel"}
 	case runtime.GOOS == "linux" && runtime.GOARCH == "amd64" && os.Getenv("APPIMAGE") != "":
-		suffix = "-x86_64.AppImage"
+		suffixes = []string{"-x86_64.AppImage"}
 	case runtime.GOOS == "linux" && runtime.GOARCH == "amd64":
-		suffix = "-linux-amd64"
-	default:
-		return nil
+		suffixes = []string{"-linux-amd64"}
 	}
-	for i := range assets {
-		n := strings.ToLower(assets[i].Name)
-		if strings.HasSuffix(n, strings.ToLower(suffix)) && ownName.MatchString(assets[i].Name) {
-			return &assets[i]
+	for _, suffix := range suffixes {
+		for i := range assets {
+			n := strings.ToLower(assets[i].Name)
+			if strings.HasSuffix(n, strings.ToLower(suffix)) && ownName.MatchString(assets[i].Name) {
+				return &assets[i]
+			}
 		}
 	}
 	return nil

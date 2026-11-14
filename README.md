@@ -75,8 +75,8 @@ file name, e.g. `ClownsecBigTop-261114.0306.exe`.
 | File | For |
 |---|---|
 | `ClownsecBigTop-<version>-windows.zip` (or the `.exe`) | Windows 10 / 11, 64-bit |
-| `clownsec-bigtop-<version>-macos-arm64` | Macs with Apple silicon (M1 and later) |
-| `clownsec-bigtop-<version>-macos-intel` | Macs with an Intel processor |
+| `clownsec-bigtop-<version>-macos-arm64.zip` | Macs with Apple silicon (M1 and later) |
+| `clownsec-bigtop-<version>-macos-intel.zip` | Macs with an Intel processor |
 | `clownsec-bigtop-<version>-x86_64.AppImage` | 64-bit Linux, as an AppImage |
 | `clownsec-bigtop-<version>-linux-amd64` | 64-bit Linux, the plain program |
 | `SHA256SUMS.txt` | checksums of all of the above |
@@ -100,11 +100,18 @@ as a generic "Trojan" by mistake. To allow it:
 
 ### macOS
 
-1. Download the `macos-arm64` file (Apple silicon) or the `macos-intel` one.
-2. Make it runnable once, in Terminal: `chmod +x clownsec-bigtop-*-macos-*`
-3. Double-click it (it opens in a Terminal window), or run it from Terminal.
-4. If macOS says it can't check the developer: **System Settings → Privacy & Security → Open
-   Anyway**. If it asks whether to accept incoming network connections, choose **Allow**.
+1. Download the `macos-arm64.zip` (Apple silicon: M1 and later) or the `macos-intel.zip`, and
+   double-click it to unzip.
+2. **The first time:** right-click (or Control-click) `clownsec-bigtop-<version>-macos-….command`
+   → **Open** → **Open**. macOS asks because the program isn't notarized by Apple yet; after this
+   once, a plain double-click works. (If it still refuses: **System Settings → Privacy & Security →
+   Open Anyway**.)
+3. It opens in a Terminal window — keep it open while you watch — and the setup page opens in
+   your browser. If macOS asks whether to accept incoming network connections, choose **Allow**.
+
+The `.command` ending is what makes a double-click open it in Terminal. The release also carries
+the same programs without it (`…-macos-arm64`, `…-macos-intel`) for the built-in updater and for
+starting from Terminal (`chmod +x` it first: downloads lose the "executable" permission).
 
 ### Linux
 

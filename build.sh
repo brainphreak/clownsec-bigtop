@@ -1,7 +1,7 @@
 #!/bin/sh
 # Builds Clownsec Big Top for Windows, macOS and Linux into dist/, the version in every file name
 # (and shown in the server's window and setup page) so a copy says which build it is:
-#   ClownsecBigTop-<v>.exe (+ -windows.zip), clownsec-bigtop-<v>-macos-arm64 / -macos-intel,
+#   ClownsecBigTop-<v>.exe (+ -windows.zip), clownsec-bigtop-<v>-macos-arm64 / -macos-intel .command (+ .zip),
 #   clownsec-bigtop-<v>-linux-amd64, clownsec-bigtop-<v>-x86_64.AppImage, SHA256SUMS.txt
 # The AppImage needs mksquashfs (squashfs-tools; on macOS: brew install squashfs) and downloads
 # the AppImage runtime once into .cache/. The updater checks every download against SHA256SUMS.txt.
@@ -13,8 +13,14 @@ VERSION=${VERSION:-$(date +%y%m%d.%H%M)}
 LDFLAGS="-X main.version=$VERSION"
 rm -rf dist && mkdir -p dist
 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "$LDFLAGS" -o "dist/ClownsecBigTop-$VERSION.exe" .
-GOOS=darwin  GOARCH=arm64 go build -trimpath -ldflags "$LDFLAGS" -o "dist/clownsec-bigtop-$VERSION-macos-arm64" .
-GOOS=darwin  GOARCH=amd64 go build -trimpath -ldflags "$LDFLAGS" -o "dist/clownsec-bigtop-$VERSION-macos-intel" .
+# macOS: .command, so Finder opens it in Terminal on a double-click (without an extension it takes the
+# version's dot for one and calls the file a document). Zipped too: unzipping keeps it executable,
+# a browser download doesn't. The plain-named copies are for the updaters in 261114.0325/.0329.
+for a in arm64:arm64 amd64:intel; do
+    GOOS=darwin GOARCH=${a%%:*} go build -trimpath -ldflags "$LDFLAGS" -o "dist/clownsec-bigtop-$VERSION-macos-${a##*:}.command" .
+    cp "dist/clownsec-bigtop-$VERSION-macos-${a##*:}.command" "dist/clownsec-bigtop-$VERSION-macos-${a##*:}"
+    (cd dist && zip -q "clownsec-bigtop-$VERSION-macos-${a##*:}.zip" "clownsec-bigtop-$VERSION-macos-${a##*:}.command")
+done
 GOOS=linux   GOARCH=amd64 go build -trimpath -ldflags "$LDFLAGS" -o "dist/clownsec-bigtop-$VERSION-linux-amd64" .
 # the Windows build zipped too: browsers and chat apps are less quick to block a zipped .exe
 (cd dist && zip -q "ClownsecBigTop-$VERSION-windows.zip" "ClownsecBigTop-$VERSION.exe")

@@ -32,6 +32,7 @@ func TestPickAndOwnName(t *testing.T) {
 	assets := []asset{{Name: "SHA256SUMS.txt"}, {Name: "ClownsecBigTop-261115.0900-windows.zip"},
 		{Name: "ClownsecBigTop-261115.0900.exe"}, {Name: "clownsec-bigtop-261115.0900-macos-arm64"},
 		{Name: "clownsec-bigtop-261115.0900-macos-intel"}, {Name: "clownsec-bigtop-261115.0900-linux-amd64"},
+		{Name: "clownsec-bigtop-261115.0900-macos-arm64.command"}, {Name: "clownsec-bigtop-261115.0900-macos-intel.command"},
 		{Name: "clownsec-bigtop-261115.0900-x86_64.AppImage"}}
 	if a := pick(assets); a == nil {
 		t.Fatal("no asset picked for this system")
