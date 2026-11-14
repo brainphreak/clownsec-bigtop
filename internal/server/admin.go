@@ -40,6 +40,7 @@ func (s *Server) adminRoutes(m *http.ServeMux) {
 	a("POST /admin/api/update/check", s.adUpdateCheck)
 	a("POST /admin/api/update", s.adUpdate)
 	a("POST /admin/api/quit", s.adQuit)
+	a("POST /admin/api/ffmpeg/download", s.adFFmpegDownload)
 	// the page shows posters through the same URLs the 3DS uses
 }
 
@@ -103,7 +104,7 @@ func (s *Server) adState(w http.ResponseWriter, r *http.Request) {
 		"name": c.Name, "id": c.ID, "port": c.Port, "allowRemoteAdmin": c.AllowRemoteAdmin,
 		"version": s.Version, "addresses": lanAddresses(c.Port), "libraries": libs,
 		"scan": s.Scanner.Status(), "catalog": map[string]int{"movies": cm, "shows": cs},
-		"update": s.Updater.Status(),
+		"update": s.Updater.Status(), "ffmpeg": s.Media.Status(),
 	})
 }
 
@@ -561,4 +562,20 @@ func logRequests(h http.Handler) http.Handler {
 			log.Printf("%s %s %s (%v)", r.RemoteAddr, r.Method, r.URL.Path, time.Since(t).Round(time.Millisecond))
 		}
 	})
+}
+
+// FFmpeg for MP4/MKV/AVI: Windows can fetch it from here; the page watches state.ffmpeg.
+func (s *Server) adFFmpegDownload(w http.ResponseWriter, r *http.Request) {
+	if !s.Media.Status().CanDownload {
+		bad(w, "Big Top can't download FFmpeg on this system. "+s.Media.Status().Hint)
+		return
+	}
+	go func() {
+		if err := s.Media.Download(); err != nil {
+			log.Printf("FFmpeg download: %v", err)
+		} else {
+			log.Printf("FFmpeg downloaded")
+		}
+	}()
+	w.WriteHeader(http.StatusAccepted)
 }

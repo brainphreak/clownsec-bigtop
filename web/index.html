@@ -89,6 +89,12 @@ dialog::backdrop { background: #000b; }
   <a id="updnotes" href="#" style="color:var(--accent2)">What's new</a>
   <button class="primary" id="updbtn">Update now</button>
 </div>
+<div id="ffbar" hidden style="background:var(--panel2);border-bottom:1px solid var(--line);padding:10px 22px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+  <span id="fftext"></span>
+  <div id="ffprog" class="bar" hidden style="width:180px;margin:0"><div></div></div>
+  <div class="grow"></div>
+  <button class="primary" id="ffbtn" hidden>Download FFmpeg</button>
+</div>
 <main>
   <div class="bar" id="scanbar" hidden><div></div></div>
 
@@ -136,7 +142,8 @@ async function loadState() {
   }
   renderLibs();
   renderUpdate();
-  return sc.running;
+  renderFF();
+  return sc.running || (state.ffmpeg && !!state.ffmpeg.state);
 }
 
 function renderUpdate() {
@@ -202,7 +209,7 @@ async function waitForNewVersion(oldVersion) {
 function renderLibs() {
   const box = $('#libs');
   if (!state.libraries.length) {
-    box.innerHTML = '<div class="card empty">No libraries yet. Add one and choose the folders where your .moflex files are.</div>';
+    box.innerHTML = '<div class="card empty">No libraries yet. Add one and choose the folders where your videos are (.moflex, and MP4/MKV/AVI with FFmpeg).</div>';
   } else {
     box.innerHTML = state.libraries.map(l => `
       <div class="card lib">
@@ -429,6 +436,7 @@ function settingsDialog() {
     <div class="hint">Off: only this computer can change libraries and edit info. Watching from a 3DS works either way.</div>
     <p class="hint">Version ${esc(state.version)} · <a href="#" id="updcheck" style="color:var(--accent2)">check for updates</a>
       <span id="updres"></span></p>
+    <p class="hint">FFmpeg (MP4/MKV/AVI): ${state.ffmpeg && state.ffmpeg.found ? esc(state.ffmpeg.version || 'found') + ' · ' + esc(state.ffmpeg.ffmpeg) : 'not found'}</p>
     <p class="hint">Clownsec catalog: ${state.catalog.movies} movies, ${state.catalog.shows} shows ·
       <a href="#" id="refresh" style="color:var(--accent2)">re-read every file's info</a></p>
     <div class="err" id="xerr"></div>
@@ -447,6 +455,30 @@ function settingsDialog() {
     catch (x) { $('#xerr').textContent = x.message; }
   };
 }
+
+// FFmpeg: MP4/MKV/AVI are transcoded for the 3DS; moflex plays without it.
+function renderFF() {
+  const f = state.ffmpeg || {};
+  const busy = !!f.state;
+  $('#ffbar').hidden = f.found && !busy && !f.error;
+  if ($('#ffbar').hidden) return;
+  $('#ffprog').hidden = !busy;
+  $('#ffbtn').hidden = busy || !f.canDownload;
+  if (busy) {
+    $('#ffprog div').style.width = (f.total ? 100 * f.done / f.total : 5) + '%';
+    $('#fftext').textContent = f.state === 'unpacking' ? 'Unpacking FFmpeg…'
+      : `Downloading FFmpeg… ${Math.round((f.done || 0) / 1048576)} of ${Math.round((f.total || 0) / 1048576) || '?'} MB`;
+  } else if (f.error) {
+    $('#fftext').textContent = 'The FFmpeg download didn\'t work: ' + f.error;
+  } else {
+    $('#fftext').textContent = 'MP4, MKV and AVI videos need FFmpeg to play on the 3DS (moflex doesn\'t). ' +
+      (f.canDownload ? 'Big Top can download it for you (about 115 MB).' : (f.hint || '') + ', then restart Big Top.');
+  }
+}
+$('#ffbtn').onclick = async () => {
+  try { await api('POST', '/admin/api/ffmpeg/download'); poll(); }
+  catch (x) { $('#fftext').textContent = x.message; }
+};
 
 // ---------- wiring ----------
 $('#addlib').onclick = () => libDialog(null);

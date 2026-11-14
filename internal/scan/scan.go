@@ -18,12 +18,15 @@ import (
 
 	"github.com/brainphreak/clownsec-bigtop/internal/catalog"
 	"github.com/brainphreak/clownsec-bigtop/internal/library"
+	"github.com/brainphreak/clownsec-bigtop/internal/media"
 	"github.com/brainphreak/clownsec-bigtop/internal/moflex"
 	"github.com/brainphreak/clownsec-bigtop/internal/poster"
 )
 
-// Extensions Big Top lists. Only moflex for now; MP4/MKV/AVI come with transcoding.
-var Extensions = map[string]bool{".moflex": true}
+// Extensions Big Top lists. Everything but moflex is transcoded by FFmpeg for the 3DS.
+var Extensions = map[string]bool{".moflex": true, ".mp4": true, ".m4v": true, ".mkv": true, ".avi": true,
+	".mov": true, ".webm": true, ".wmv": true, ".mpg": true, ".mpeg": true, ".ts": true, ".m2ts": true,
+	".flv": true, ".ogv": true, ".3gp": true, ".vob": true}
 
 type Status struct {
 	Running bool   `json:"running"`
@@ -40,6 +43,7 @@ type Scanner struct {
 	Store   *library.Store
 	Catalog *catalog.Catalog
 	Posters *poster.Store
+	Media   *media.Tool // ffprobe for non-moflex files (nil or missing: probed later, on demand)
 	DataDir string
 
 	run    sync.Mutex // one scan at a time
@@ -276,9 +280,11 @@ func (sc *Scanner) identify(it *library.Item) {
 	// a super moflex says what it is itself
 	var sup *moflex.Super
 	showDesc := ""
-	if f, err := os.Open(it.Path); err == nil {
-		sup, _ = moflex.ReadSuper(f, it.Size)
-		f.Close()
+	if library.IsMoflex(it.Path) {
+		if f, err := os.Open(it.Path); err == nil {
+			sup, _ = moflex.ReadSuper(f, it.Size)
+			f.Close()
+		}
 	}
 	if sup != nil {
 		source = "super"
@@ -328,6 +334,19 @@ func (sc *Scanner) identify(it *library.Item) {
 		}
 	}
 
+	// not moflex: its streams (length, audio and subtitle tracks), for transcoding
+	var med *library.Media
+	if !library.IsMoflex(it.Path) && sc.Media != nil && sc.Media.Available() {
+		if m, err := sc.Media.Probe(it.Path); err == nil {
+			m.Probed, med = it.MTime, m
+			if det.Runtime == 0 && m.DurMs > 0 {
+				det.Runtime = int((m.DurMs + 30000) / 60000)
+			}
+		} else {
+			log.Printf("ffprobe %s: %v", filepath.Base(it.Path), err)
+		}
+	}
+
 	// the poster: the user's own stays; else the catalog's art (sharper than the trailer's
 	// 132x188 thumbnail) when this IS the catalog's file or there is nothing better; else the trailer's
 	sc.Store.RLock()
@@ -355,6 +374,9 @@ func (sc *Scanner) identify(it *library.Item) {
 	sc.Store.Lock()
 	defer sc.Store.Unlock()
 	it.Detected, it.Source, it.Catalog = det, source, catID
+	if med != nil {
+		it.Media = med
+	}
 	it.Super = sup != nil
 	it.ShowDesc = showDesc
 	if sup != nil {

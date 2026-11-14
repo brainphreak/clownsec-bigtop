@@ -15,6 +15,7 @@ import (
 	"github.com/brainphreak/clownsec-bigtop/internal/catalog"
 	"github.com/brainphreak/clownsec-bigtop/internal/config"
 	"github.com/brainphreak/clownsec-bigtop/internal/library"
+	"github.com/brainphreak/clownsec-bigtop/internal/media"
 	"github.com/brainphreak/clownsec-bigtop/internal/poster"
 	"github.com/brainphreak/clownsec-bigtop/internal/scan"
 	"github.com/brainphreak/clownsec-bigtop/internal/update"
@@ -28,6 +29,8 @@ type Server struct {
 	Catalog *catalog.Catalog
 	Version string
 	Updater *update.Updater
+	Media   *media.Tool // FFmpeg: MP4/MKV/AVI streaming
+	DataDir string
 	Quit    func()                     // stop Big Top (the setup page's Quit button)
 	Restart func(newPath string) error // start this new build and exit (after an update)
 }
@@ -44,6 +47,7 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("GET /api/items/{id}", s.apiItem)
 	m.HandleFunc("GET /api/items/{id}/poster", s.apiItemPoster)
 	m.HandleFunc("GET /api/items/{id}/file", s.apiFile)
+	m.HandleFunc("GET /api/items/{id}/stream.ts", s.apiStream)
 	m.HandleFunc("GET /api/items/{id}/subs", s.apiSubs)
 	m.HandleFunc("GET /api/items/{id}/subs/{n}", s.apiSubFile)
 	m.HandleFunc("POST /api/items/{id}/progress", s.apiProgress)
@@ -79,6 +83,12 @@ type Entry struct {
 	AltAudio string `json:"altAudio,omitempty"`
 	Subs     string `json:"subs,omitempty"`
 	File     string `json:"file,omitempty"`
+	// not moflex: the 3DS plays /stream.ts (H.264 + AAC MPEG-TS, New 3DS) instead of /file
+	Stream      bool       `json:"stream,omitempty"`
+	DurMs       int64      `json:"dur,omitempty"`
+	AudioTracks []TrackOut `json:"audioTracks,omitempty"` // stream.ts?audio=n
+	BurnSubs    []TrackOut `json:"burnSubs,omitempty"`    // stream.ts?burn=n (picture subtitles)
+	StreamErr   string     `json:"streamErr,omitempty"`   // why it can't be streamed now (shown on the 3DS)
 }
 
 func clientID(r *http.Request) string {
@@ -125,6 +135,21 @@ func (s *Server) itemEntry(it *library.Item, client string, full bool) Entry {
 	} else {
 		e.Audio, e.AltAudio, e.Subs, e.File = it.Audio, it.AltAudio, strings.Join(it.Subs, " "), filepath.Base(it.Path)
 	}
+	if !library.IsMoflex(it.Path) {
+		e.Stream = true
+		if full && !s.Media.Available() {
+			e.StreamErr = "This video needs FFmpeg on the Big Top computer. Open Big Top's setup page to get it."
+		} else if full && it.Media == nil {
+			e.StreamErr = "Big Top can't read this video file."
+		}
+		if m := it.Media; m != nil {
+			e.DurMs = m.DurMs
+			if full {
+				e.AudioTracks = trackList(m.Audio, true)
+				e.BurnSubs = trackList(burnable(m), false)
+			}
+		}
+	}
 	if p := s.Store.DB.Progress[client][it.ID]; p != nil {
 		e.Pos, e.Watched = p.PosMs, p.Watched
 	}
@@ -152,11 +177,12 @@ func (s *Server) apiLibraries(w http.ResponseWriter, r *http.Request) {
 		Shows  int    `json:"shows"`
 	}
 	out := []L{}
+	hide := s.shadowed()
 	for _, l := range s.Store.DB.Libraries {
 		x := L{ID: l.ID, Name: l.Name}
 		shows := map[string]bool{}
 		for _, it := range s.Store.DB.Items {
-			if it.Lib != l.ID || it.Missing != 0 {
+			if it.Lib != l.ID || it.Missing != 0 || hide[it.ID] {
 				continue
 			}
 			if it.IsEpisode() {
@@ -199,8 +225,9 @@ func (s *Server) apiLibrary(w http.ResponseWriter, r *http.Request) {
 	}
 	var list []Entry
 	shows := map[string]*Entry{}
+	hide := s.shadowed()
 	for _, it := range s.Store.DB.Items {
-		if it.Lib != id || it.Missing != 0 {
+		if it.Lib != id || it.Missing != 0 || hide[it.ID] {
 			continue
 		}
 		if !it.IsEpisode() {
@@ -247,8 +274,9 @@ func (s *Server) showEntry(sid, fallbackTitle string) *Entry {
 
 func (s *Server) episodes(sid, client string) []*library.Item {
 	var eps []*library.Item
+	hide := s.shadowed()
 	for _, it := range s.Store.DB.Items {
-		if it.Missing == 0 && it.IsEpisode() && library.ShowID(it.Lib, it.Info().Show) == sid {
+		if it.Missing == 0 && !hide[it.ID] && it.IsEpisode() && library.ShowID(it.Lib, it.Info().Show) == sid {
 			eps = append(eps, it)
 		}
 	}
@@ -316,6 +344,11 @@ func (s *Server) item(w http.ResponseWriter, r *http.Request) *library.Item {
 }
 
 func (s *Server) apiItem(w http.ResponseWriter, r *http.Request) {
+	if s.Media.Available() {
+		if _, m, _ := s.mediaOf(r.PathValue("id")); m != nil { // tracks for the page; subtitles readied
+			go s.prefetchSubs(r.PathValue("id"))
+		}
+	}
 	s.Store.RLock()
 	defer s.Store.RUnlock()
 	if it := s.item(w, r); it != nil {

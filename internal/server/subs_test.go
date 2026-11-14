@@ -13,7 +13,8 @@ func TestSidecars(t *testing.T) {
 		os.WriteFile(filepath.Join(d, f), []byte("x"), 0o644)
 	}
 	got := sidecars(filepath.Join(d, "Movie.moflex"))
-	want := []Sidecar{{0, "Movie.srt", "", "srt", false}, {1, "Movie.en.forced.srt", "en.forced", "srt", true}, {2, "Movie.ja.ass", "ja", "ass", false}}
+	want := []Sidecar{{N: 0, File: "Movie.srt", Ext: "srt"}, {N: 1, File: "Movie.en.forced.srt", Label: "en.forced", Ext: "srt", Forced: true},
+		{N: 2, File: "Movie.ja.ass", Label: "ja", Ext: "ass"}}
 	if len(got) != len(want) {
 		t.Fatalf("got %+v", got)
 	}

@@ -1,12 +1,16 @@
 package server
 
 import (
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/brainphreak/clownsec-bigtop/internal/library"
+	"github.com/brainphreak/clownsec-bigtop/internal/media"
 )
 
 // Sidecar subtitles: files next to the video, named after it -- the convention Plex and the
@@ -25,6 +29,9 @@ type Sidecar struct {
 	Label  string `json:"label"` // what sits between the video's name and the extension ("en.forced"), "" = default
 	Ext    string `json:"ext"`   // "srt", "ass", "ssa"
 	Forced bool   `json:"forced,omitempty"`
+	// a text track inside the video (MKV/MP4), handed out as a file; File is then empty
+	Embedded bool `json:"embedded,omitempty"`
+	track    int  // index into textSubs
 }
 
 var subExt = map[string]bool{".srt": true, ".ass": true, ".ssa": true}
@@ -83,11 +90,23 @@ func (s *Server) apiSubs(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	writeJSON(w, s.subList(r.PathValue("id"), p))
+}
+
+// subList: the sidecar files, then the video's own text tracks (not moflex).
+func (s *Server) subList(id, p string) []Sidecar {
 	list := sidecars(p)
 	if list == nil {
 		list = []Sidecar{}
 	}
-	writeJSON(w, list)
+	if !library.IsMoflex(p) && s.Media.Available() {
+		_, m, _ := s.mediaOf(id)
+		for i, t := range textSubs(m) {
+			list = append(list, Sidecar{N: len(list), Label: trackName(t, i, false), Ext: media.SubExt(t.Codec),
+				Forced: t.Forced, Embedded: true, track: i})
+		}
+	}
+	return list
 }
 
 func (s *Server) apiSubFile(w http.ResponseWriter, r *http.Request) {
@@ -97,11 +116,27 @@ func (s *Server) apiSubFile(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	list := sidecars(p)
+	list := s.subList(r.PathValue("id"), p)
 	if n < 0 || n >= len(list) {
 		http.NotFound(w, r)
 		return
 	}
+	file := filepath.Join(filepath.Dir(p), list[n].File)
+	if list[n].Embedded {
+		it, m, path := s.mediaOf(r.PathValue("id"))
+		ts := textSubs(m)
+		if it == nil || list[n].track >= len(ts) {
+			http.NotFound(w, r)
+			return
+		}
+		f, err := s.embeddedSub(it, path, ts[list[n].track])
+		if err != nil {
+			log.Printf("subtitles %s: %v", filepath.Base(path), err)
+			http.Error(w, "the subtitle track couldn't be read", http.StatusInternalServerError)
+			return
+		}
+		file = f
+	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	http.ServeFile(w, r, filepath.Join(filepath.Dir(p), list[n].File))
+	http.ServeFile(w, r, file)
 }

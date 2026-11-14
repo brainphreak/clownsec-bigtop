@@ -23,6 +23,7 @@ import (
 	"github.com/brainphreak/clownsec-bigtop/internal/config"
 	"github.com/brainphreak/clownsec-bigtop/internal/discovery"
 	"github.com/brainphreak/clownsec-bigtop/internal/library"
+	"github.com/brainphreak/clownsec-bigtop/internal/media"
 	"github.com/brainphreak/clownsec-bigtop/internal/poster"
 	"github.com/brainphreak/clownsec-bigtop/internal/scan"
 	"github.com/brainphreak/clownsec-bigtop/internal/server"
@@ -64,9 +65,11 @@ func main() {
 	if err := cat.Load(dir); err != nil {
 		log.Printf("Clownsec catalog not available yet (%v); matching by file name", err)
 	}
-	sc := &scan.Scanner{Store: store, Catalog: cat, Posters: posters, DataDir: dir}
+	ff := media.New(dir)
+	sc := &scan.Scanner{Store: store, Catalog: cat, Posters: posters, Media: ff, DataDir: dir}
 	upd := update.New(version)
-	srv := &server.Server{Cfg: cfg, Store: store, Scanner: sc, Posters: posters, Catalog: cat, Version: version, Updater: upd}
+	srv := &server.Server{Cfg: cfg, Store: store, Scanner: sc, Posters: posters, Catalog: cat, Version: version,
+		Updater: upd, Media: ff, DataDir: dir}
 	srv.Quit = func() { store.Save(); appExit(0) }
 	srv.Restart = func(newPath string) error {
 		// the new build, with this run's options (and no second browser tab: the page reconnects)

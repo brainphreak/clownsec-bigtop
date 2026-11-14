@@ -92,6 +92,33 @@ type Item struct {
 	ShowDesc string   `json:"showDesc,omitempty"` // a super moflex episode: its show's description
 	Poster   string   `json:"poster,omitempty"`   // file in the posters folder
 	PosterBy string   `json:"posterBy,omitempty"` // "super", "catalog", "user"
+	Media    *Media   `json:"media,omitempty"`    // not moflex: what ffprobe found (nil = not probed yet)
+}
+
+// Media is a non-moflex file's streams, as ffprobe reports them. Big Top transcodes these to the
+// H.264 + AAC MPEG-TS the 3DS plays.
+type Media struct {
+	DurMs  int64   `json:"dur"`
+	Video  int     `json:"video"` // stream index of the picture (-1 = none)
+	W      int     `json:"w,omitempty"`
+	H      int     `json:"h,omitempty"`
+	SAR    float64 `json:"sar,omitempty"`        // pixel aspect (DVD rips: != 1)
+	Interl bool    `json:"interlaced,omitempty"` // needs deinterlacing
+	Audio  []Track `json:"audio,omitempty"`
+	Subs   []Track `json:"subs,omitempty"`
+	Probed int64   `json:"probed"` // the file's mtime when probed
+}
+
+// Track is one audio or subtitle stream inside a file.
+type Track struct {
+	Index    int    `json:"i"` // ffmpeg stream index
+	Codec    string `json:"codec"`
+	Lang     string `json:"lang,omitempty"`
+	Title    string `json:"title,omitempty"`
+	Channels int    `json:"ch,omitempty"`
+	Default  bool   `json:"default,omitempty"`
+	Forced   bool   `json:"forced,omitempty"`
+	Image    bool   `json:"image,omitempty"` // a picture subtitle (PGS, DVD): can only be burned in
 }
 
 // Stereo3D: any of the 3D values.
