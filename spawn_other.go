@@ -33,8 +33,3 @@ func spawn(path string, args []string, dataDir string) error {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // survives this process and its terminal
 	return cmd.Start()
 }
-
-func isTerminal() bool {
-	st, err := os.Stdin.Stat()
-	return err == nil && st.Mode()&os.ModeCharDevice != 0
-}
