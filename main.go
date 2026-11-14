@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -86,7 +87,9 @@ func main() {
 		self, _ := update.Self()
 		args = append(args, "-no-browser", "-replaces", self)
 		store.Save()
+		fmt.Printf("\n  Updating: starting %s ...\n\n", filepath.Base(newPath))
 		if err := spawn(newPath, args, dir); err != nil {
+			fmt.Printf("  The new version didn't start (%v). This one keeps running.\n\n", err)
 			return err
 		}
 		go func() { time.Sleep(400 * time.Millisecond); os.Exit(0) }()
