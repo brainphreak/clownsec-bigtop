@@ -86,8 +86,9 @@ file name, e.g. `ClownsecBigTop-261114.0306.exe`.
 1. Unzip `ClownsecBigTop-<version>-windows.zip` and run `ClownsecBigTop-<version>.exe`.
 2. **"Windows protected your PC"** (SmartScreen) appears because the program isn't code-signed yet:
    click **More info → Run anyway**.
-3. When **Windows Firewall** asks, allow it on **Private networks**. Without this the 3DS can't
-   reach it.
+3. When **Windows Firewall** asks, allow it on **Private networks** (your home network — not
+   public). Without this the 3DS can't reach it. It asks once more after the first update (the
+   program's file becomes `ClownsecBigTop.exe`, see [Updates](#updates)), then never again.
 4. Big Top starts in the **notification area** (the icons by the clock — it may be under the ^
    arrow) and the setup page opens in your browser. There's no window to keep open.
    - **Left-click** the clownsec icon: open the setup page.
@@ -155,7 +156,9 @@ current one, checks it against the release's `SHA256SUMS.txt`, starts it and clo
 over. Nothing updates without the click: a restart would interrupt anyone watching.
 **Settings → check for updates** checks straight away.
 
-On Windows the tray icon is simply replaced by the new version's. On a Mac running Big Top in
+On Windows the tray icon is simply replaced by the new version's, and the update is saved as
+`ClownsecBigTop.exe` in the same folder — always that name, because Windows Firewall remembers its
+permission per file: after the first update it stops asking, and shortcuts to it keep working. On a Mac running Big Top in
 Terminal, the new version opens in a new Terminal window. Otherwise (Linux, an AppImage) it carries
 on in the background, logging to `bigtop.log` in the data folder — stop it with **Quit**. The tray
 menu's *Update to …* does the same as the setup page's button.

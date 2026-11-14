@@ -221,7 +221,7 @@ func (u *Updater) Download() (string, error) {
 	if want == "" {
 		return fail(errors.New("the release has no checksum for " + a.Name))
 	}
-	dest := filepath.Join(filepath.Dir(self), a.Name)
+	dest := filepath.Join(filepath.Dir(self), InstallName(a.Name))
 	tmp := dest + ".download"
 	resp, err := u.client.Get(a.URL)
 	if err != nil {
@@ -250,12 +250,42 @@ func (u *Updater) Download() (string, error) {
 		os.Remove(tmp)
 		return fail(err)
 	}
-	os.Remove(dest)
+	if samePath(dest, self) {
+		// Windows: the update keeps this file's name, which is the running program's. A running
+		// .exe can't be replaced, but it can be renamed: move it aside (Cleanup removes it later).
+		os.Remove(self + ".old")
+		if err := os.Rename(self, self+".old"); err != nil {
+			os.Remove(tmp)
+			return fail(fmt.Errorf("can't make room for the new version (%v)", err))
+		}
+	} else {
+		os.Remove(dest)
+	}
 	if err := os.Rename(tmp, dest); err != nil {
 		os.Remove(tmp)
+		if samePath(dest, self) {
+			os.Rename(self+".old", self) // put the running one back
+		}
 		return fail(err)
 	}
 	return dest, nil
+}
+
+// InstallName is the file an update is saved as. On Windows always ClownsecBigTop.exe: Windows
+// Firewall remembers its permission per file path, so a new name with every version asked the
+// viewer again each time (and broke shortcuts). Elsewhere, the release's own versioned name.
+var InstallName = func(asset string) string { // a variable so tests can play Windows
+	if runtime.GOOS == "windows" {
+		return "ClownsecBigTop.exe"
+	}
+	return asset
+}
+
+func samePath(a, b string) bool {
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" { // case-insensitive file systems
+		return strings.EqualFold(filepath.Clean(a), filepath.Clean(b))
+	}
+	return filepath.Clean(a) == filepath.Clean(b)
 }
 
 // progress counts the download for the setup page's bar
@@ -285,13 +315,21 @@ func (u *Updater) MarkRestarting() { u.set(func(s *Status) { s.State = "restarti
 // of it (Windows keeps a running .exe locked). Only Big Top's own build files are ever deleted.
 func Cleanup(old string) {
 	self, _ := Self()
-	if old == "" || old == self || !ownName.MatchString(filepath.Base(old)) {
+	gone := func(p string) {
+		for i := 0; i < 40; i++ { // Windows keeps a running .exe locked until it has exited
+			if err := os.Remove(p); err == nil || os.IsNotExist(err) {
+				return
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
+	if self != "" {
+		if _, err := os.Stat(self + ".old"); err == nil {
+			gone(self + ".old") // the version this one replaced under the same name
+		}
+	}
+	if old == "" || samePath(old, self) || !ownName.MatchString(filepath.Base(old)) {
 		return
 	}
-	for i := 0; i < 40; i++ {
-		if err := os.Remove(old); err == nil || os.IsNotExist(err) {
-			return
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
+	gone(old)
 }
