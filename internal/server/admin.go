@@ -123,18 +123,24 @@ func (s *Server) adUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusAccepted)
-	go func() {
-		p, err := s.Updater.Download()
-		if err != nil {
-			log.Printf("update: %v", err)
-			return
-		}
-		s.Updater.MarkRestarting()
-		log.Printf("update: starting %s", filepath.Base(p))
-		if err := s.Restart(p); err != nil {
-			log.Printf("update: couldn't start the new version: %v", err)
-		}
-	}()
+	go s.StartUpdate()
+}
+
+// StartUpdate downloads and installs the waiting update (the setup page and the Windows tray menu
+// both come here). It returns only if that fails; on success Big Top restarts as the new version.
+func (s *Server) StartUpdate() error {
+	p, err := s.Updater.Download()
+	if err != nil {
+		log.Printf("update: %v", err)
+		return err
+	}
+	s.Updater.MarkRestarting()
+	log.Printf("update: starting %s", filepath.Base(p))
+	if err := s.Restart(p); err != nil {
+		log.Printf("update: couldn't start the new version: %v", err)
+		return err
+	}
+	return nil
 }
 
 func (s *Server) adQuit(w http.ResponseWriter, r *http.Request) {

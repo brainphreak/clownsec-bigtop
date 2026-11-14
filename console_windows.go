@@ -5,37 +5,55 @@ package main
 import (
 	"log"
 	"os"
+	"path/filepath"
 	"syscall"
 	"unsafe"
 )
 
-// fixConsole: a Big Top started by the updater gets a console window of its own, but a started
-// program's output goes to NUL unless told otherwise -- the window stayed empty and looked hung.
-// When our output isn't a console, write to the window's console instead.
-func fixConsole() {
-	k32 := syscall.NewLazyDLL("kernel32.dll")
-	getMode := k32.NewProc("GetConsoleMode")
-	var mode uint32
-	if r, _, _ := getMode.Call(os.Stdout.Fd(), uintptr(unsafe.Pointer(&mode))); r != 0 {
-		return // already a console
+// setupOutput: the Windows build is a tray app with no console, so what other systems print goes
+// to bigtop.log in the data folder. -console asks for a console window instead (and a Big Top
+// started from a command prompt keeps using that one).
+func setupOutput(dataDir string, wantConsole bool) {
+	if hasConsole() {
+		return
 	}
-	out, err := os.OpenFile("CONOUT$", os.O_RDWR, 0)
-	if err != nil {
-		return // no console at all (a service): stay quiet
+	if wantConsole {
+		kernel32.NewProc("AllocConsole").Call()
+		if out, err := os.OpenFile("CONOUT$", os.O_RDWR, 0); err == nil {
+			os.Stdout, os.Stderr = out, out
+			log.SetOutput(out)
+			if in, err := os.OpenFile("CONIN$", os.O_RDWR, 0); err == nil {
+				os.Stdin = in
+			}
+			return
+		}
 	}
-	os.Stdout, os.Stderr = out, out
-	log.SetOutput(out)
-	if in, err := os.OpenFile("CONIN$", os.O_RDWR, 0); err == nil {
-		os.Stdin = in // fatal's "Press Enter to close"
+	p := filepath.Join(dataDir, "bigtop.log")
+	if st, err := os.Stat(p); err == nil && st.Size() > 2<<20 { // keep it small: start over past 2 MB
+		os.Rename(p, p+".old")
+	}
+	if f, err := os.OpenFile(p, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644); err == nil {
+		os.Stdout, os.Stderr = f, f
+		log.SetOutput(f)
 	}
 }
 
-// setTitle names the console window ("Clownsec Big Top 261114.0432 - running"), so a minimised
-// or freshly opened window says what it is.
+func hasConsole() bool {
+	var mode uint32
+	r, _, _ := kernel32.NewProc("GetConsoleMode").Call(os.Stdout.Fd(), uintptr(unsafe.Pointer(&mode)))
+	return r != 0
+}
+
+// setTitle names the console window, when there is one.
 func setTitle(t string) {
+	if !hasConsole() {
+		return
+	}
 	p, err := syscall.UTF16PtrFromString(t)
 	if err != nil {
 		return
 	}
-	syscall.NewLazyDLL("kernel32.dll").NewProc("SetConsoleTitleW").Call(uintptr(unsafe.Pointer(p)))
+	kernel32.NewProc("SetConsoleTitleW").Call(uintptr(unsafe.Pointer(p)))
 }
+
+func hasConsoleNow() bool { return hasConsole() }

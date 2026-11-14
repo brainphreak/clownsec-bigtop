@@ -12,7 +12,8 @@ VERSION=${VERSION:-$(date +%y%m%d.%H%M)}
 # symbols kept (no -s -w): antivirus software treats stripped Go binaries as suspicious
 LDFLAGS="-X main.version=$VERSION"
 rm -rf dist && mkdir -p dist
-GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "$LDFLAGS" -o "dist/ClownsecBigTop-$VERSION.exe" .
+# Windows: a tray app (-H windowsgui: no console window; -console brings one back)
+GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "$LDFLAGS -H windowsgui" -o "dist/ClownsecBigTop-$VERSION.exe" .
 # macOS: .command, so Finder opens it in Terminal on a double-click (without an extension it takes the
 # version's dot for one and calls the file a document). Zipped too: unzipping keeps it executable,
 # a browser download doesn't. The plain-named copies are for the updaters in 261114.0325/.0329.

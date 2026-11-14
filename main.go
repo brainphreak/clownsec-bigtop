@@ -3,6 +3,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -35,14 +36,15 @@ func main() {
 	portFlag := flag.Int("port", 0, "HTTP port (default 32500, or the last one set)")
 	noBrowser := flag.Bool("no-browser", false, "don't open the setup page on start")
 	replaces := flag.String("replaces", "", "") // set by the updater: the old build to wait for and remove
+	console := flag.Bool("console", false, "Windows: show a console window instead of only the tray icon")
 	flag.Parse()
-	fixConsole()
 
-	fmt.Printf("Clownsec Big Top %s\n", version)
 	dir, err := config.DataDir(*dataFlag)
 	if err != nil {
 		fatal("data folder: %v", err)
 	}
+	setupOutput(dir, *console) // Windows: the log file (a tray app has no console), or -console's window
+	fmt.Printf("Clownsec Big Top %s\n", version)
 	cfg, err := config.Load(dir)
 	if err != nil {
 		fatal("settings: %v", err)
@@ -65,7 +67,7 @@ func main() {
 	sc := &scan.Scanner{Store: store, Catalog: cat, Posters: posters, DataDir: dir}
 	upd := update.New(version)
 	srv := &server.Server{Cfg: cfg, Store: store, Scanner: sc, Posters: posters, Catalog: cat, Version: version, Updater: upd}
-	srv.Quit = func() { store.Save(); os.Exit(0) }
+	srv.Quit = func() { store.Save(); appExit(0) }
 	srv.Restart = func(newPath string) error {
 		// the new build, with this run's options (and no second browser tab: the page reconnects)
 		var args []string
@@ -92,12 +94,19 @@ func main() {
 			fmt.Printf("  The new version didn't start (%v). This one keeps running.\n\n", err)
 			return err
 		}
-		go func() { time.Sleep(400 * time.Millisecond); os.Exit(0) }()
+		go func() { time.Sleep(400 * time.Millisecond); appExit(0) }()
 		return nil
 	}
 
 	port := cfg.Snapshot().Port
 	ln, err := net.Listen("tcp", ":"+strconv.Itoa(port))
+	if err != nil && *replaces == "" && alreadyRunning(port) {
+		// started again while it runs (easy to do with a tray app): just show it
+		if !*noBrowser {
+			openBrowser(fmt.Sprintf("http://localhost:%d/", port))
+		}
+		return
+	}
 	for i := 0; err != nil && *replaces != "" && i < 40; i++ { // the old build is still letting go
 		time.Sleep(500 * time.Millisecond)
 		ln, err = net.Listen("tcp", ":"+strconv.Itoa(port))
@@ -111,6 +120,7 @@ func main() {
 	if version != "dev" {
 		go upd.Loop(func(st update.Status) {
 			log.Printf("Big Top %s is available -- open the setup page to update.", st.Latest)
+			trayNotify("Big Top "+st.Latest+" is available", "Right-click the Big Top icon > Update, or open the setup page.")
 		})
 	}
 	go func() {
@@ -132,9 +142,62 @@ func main() {
 		fmt.Printf("  On the 3DS:  BIG TOP > Find servers, or enter %s\n", a)
 	}
 	fmt.Printf("  Data folder: %s\n\n", dir)
-	fmt.Println("  Keep this window open while you watch. Close it to stop Big Top.")
+	if haveTray && !*console {
+		fmt.Println("  Big Top runs in the notification area (by the clock): right-click its icon for the menu.")
+	} else {
+		fmt.Println("  Keep this window open while you watch. Close it to stop Big Top.")
+	}
 	fmt.Println()
 	setTitle("Clownsec Big Top " + version + " - running")
+	if haveTray {
+		go runTray(TrayActions{
+			Version:  version,
+			OpenPage: func() { openBrowser(page) },
+			UpdateLabel: func() (string, bool) {
+				st := upd.Status()
+				switch {
+				case st.State == "downloading" || st.State == "restarting":
+					return "Updating to " + st.Latest + "...", false
+				case st.Available:
+					return "Update to " + st.Latest, true
+				}
+				return "Check for updates", version != "dev"
+			},
+			Update: func() {
+				if upd.Status().Available {
+					if err := srv.StartUpdate(); err != nil {
+						trayNotify("The update didn't install", err.Error())
+					}
+					return
+				}
+				if err := upd.Check(); err != nil {
+					trayNotify("Couldn't check for updates", err.Error())
+				} else if st := upd.Status(); st.Available {
+					trayNotify("Big Top "+st.Latest+" is available", "Right-click the icon > Update to "+st.Latest+".")
+				} else {
+					trayNotify("Big Top is up to date", "You have the latest version, "+version+".")
+				}
+			},
+			ShowLog: func() {
+				if p := filepath.Join(dir, "bigtop.log"); fileExists(p) {
+					openBrowser(p) // opens in the text editor
+				} else {
+					openBrowser(dir)
+				}
+			},
+			OpenData: func() { openBrowser(dir) },
+			Restart: func() {
+				self, err := update.Self()
+				if err == nil {
+					err = srv.Restart(self)
+				}
+				if err != nil {
+					trayNotify("Big Top couldn't restart", err.Error())
+				}
+			},
+			Quit: srv.Quit,
+		})
+	}
 
 	// look for new and changed files now and every half hour (unchanged files cost a stat each)
 	go func() {
@@ -152,7 +215,7 @@ func main() {
 	go func() {
 		<-stop
 		store.Save()
-		os.Exit(0)
+		appExit(0)
 	}()
 	hs := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: 20 * time.Second}
 	if err := hs.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -160,15 +223,41 @@ func main() {
 	}
 }
 
-// fatal explains and waits: on Windows the window would otherwise vanish before it can be read.
+// fatal explains and waits: a Windows tray app shows a message box (it has no window to print
+// into); a console would otherwise vanish before it can be read.
 func fatal(f string, a ...any) {
-	fmt.Fprintf(os.Stderr, "\nBig Top can't start: "+f+"\n", a...)
-	if runtime.GOOS == "windows" {
+	msg := fmt.Sprintf("Big Top can't start: "+f, a...)
+	fmt.Fprintln(os.Stderr, "\n"+msg)
+	if haveTray && !hasConsoleNow() {
+		messageBox("Clownsec Big Top", msg, true)
+	} else if runtime.GOOS == "windows" {
 		fmt.Fprintln(os.Stderr, "Press Enter to close.")
 		fmt.Scanln()
 	}
-	os.Exit(1)
+	appExit(1)
 }
+
+// appExit takes the tray icon down first: Windows leaves a dead icon behind otherwise.
+func appExit(code int) {
+	trayRemove()
+	os.Exit(code)
+}
+
+// alreadyRunning: is the program holding our port a Big Top?
+func alreadyRunning(port int) bool {
+	c := &http.Client{Timeout: 2 * time.Second}
+	r, err := c.Get(fmt.Sprintf("http://localhost:%d/api/server", port))
+	if err != nil {
+		return false
+	}
+	defer r.Body.Close()
+	var a struct {
+		Service string `json:"service"`
+	}
+	return json.NewDecoder(r.Body).Decode(&a) == nil && a.Service == "clownsec-bigtop"
+}
+
+func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
 
 // the addresses a 3DS can be given (the same list the setup page shows)
 func lanAddrs() []string {

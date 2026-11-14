@@ -88,8 +88,14 @@ file name, e.g. `ClownsecBigTop-261114.0306.exe`.
    click **More info → Run anyway**.
 3. When **Windows Firewall** asks, allow it on **Private networks**. Without this the 3DS can't
    reach it.
-4. A black window opens (keep it open while you watch — closing it stops Big Top) and the setup
-   page opens in your browser.
+4. Big Top starts in the **notification area** (the icons by the clock — it may be under the ^
+   arrow) and the setup page opens in your browser. There's no window to keep open.
+   - **Left-click** the clownsec icon: open the setup page.
+   - **Right-click** it: *Open setup page*, *Check for updates* (or *Update to …*), *Show log*,
+     *Open data folder*, *Restart Big Top*, *Quit Big Top*.
+   - A notification pops up when an update is available.
+   - Starting Big Top again while it runs just opens the setup page.
+   - Prefer a console window? Start it with `-console` (e.g. in a shortcut's *Target*).
 
 **If Microsoft Defender deletes the file:** unsigned programs written in Go are sometimes flagged
 as a generic "Trojan" by mistake. To allow it:
@@ -135,8 +141,10 @@ program.) If a firewall is running, open TCP
 It opens by itself at **http://localhost:32500**. Open it again any time in a browser on the same
 computer. At the top it shows the server's name and the address a 3DS can use.
 
-Big Top runs until you close its window, press Ctrl+C, or press **Quit** in the setup page. There
-is no installer and nothing starts by itself — start Big Top when you want to watch.
+Big Top runs until you quit it — **Quit** in the setup page, *Quit Big Top* in the Windows tray
+menu, or closing its Terminal window (macOS) / Ctrl+C. There is no installer and nothing starts by
+itself — start Big Top when you want to watch. (To start it with Windows, put a shortcut to it in
+the Startup folder: Win+R → `shell:startup`.)
 
 ### Updates
 
@@ -147,9 +155,10 @@ current one, checks it against the release's `SHA256SUMS.txt`, starts it and clo
 over. Nothing updates without the click: a restart would interrupt anyone watching.
 **Settings → check for updates** checks straight away.
 
-On Windows the new version opens in a new window; on a Mac running Big Top in Terminal, in a new
-Terminal window. Otherwise (Linux, an AppImage) it carries on in the background, logging to
-`bigtop.log` in the data folder — stop it with **Quit**.
+On Windows the tray icon is simply replaced by the new version's. On a Mac running Big Top in
+Terminal, the new version opens in a new Terminal window. Otherwise (Linux, an AppImage) it carries
+on in the background, logging to `bigtop.log` in the data folder — stop it with **Quit**. The tray
+menu's *Update to …* does the same as the setup page's button.
 
 ---
 
@@ -364,7 +373,7 @@ buffer; the button changes at once and the switch happens when you stop pressing
 | `bigtop.json` | libraries, every video's detected info and your edits, shows, watch progress |
 | `catalog.json` | the cached Clownsec catalog (refreshed daily) |
 | `posters/` | posters, and resized copies in `posters/sized/` |
-| `bigtop.log` | output of a Big Top restarted in the background by an update (Linux / AppImage) |
+| `bigtop.log` | what Big Top reports as it runs, on Windows (tray menu → *Show log*) and when it runs in the background (Linux / AppImage) |
 
 Back up the folder to keep your edits and watch history; delete it to start over. If `bigtop.json`
 is ever unreadable, it's set aside (renamed `.broken-<date>`) rather than overwritten.
@@ -377,6 +386,7 @@ is ever unreadable, it's set aside (renamed `.broken-<date>`) rather than overwr
 -data <folder>   keep settings, library and posters in this folder instead
 -port <number>   HTTP port (default 32500; remembered once set)
 -no-browser      don't open the setup page on start
+-console         Windows: show a console window instead of only the tray icon
 ```
 
 ---
@@ -438,7 +448,7 @@ The HTTP interface is described in [docs/API.md](docs/API.md).
   player to draw, in 3D too.
 - **Online info** for files the Clownsec catalog doesn't know: TMDB / TVDB.
 - Your own artwork beside the videos (`Movie.jpg`, `poster.jpg`) picked up automatically.
-- A tray icon instead of a console window on Windows; code signing.
+- Code signing (no more SmartScreen / Defender warnings).
 - A sharper icon.
 
 ---
