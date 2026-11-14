@@ -84,7 +84,7 @@ dialog::backdrop { background: #000b; }
 </header>
 <div id="updbar" hidden style="background:var(--panel2);border-bottom:1px solid var(--line);padding:10px 22px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
   <span id="updtext"></span><div class="grow"></div>
-  <a id="updnotes" href="#" target="_blank" rel="noopener" style="color:var(--accent2)">What's new</a>
+  <a id="updnotes" href="#" style="color:var(--accent2)">What's new</a>
   <button class="primary" id="updbtn">Update now</button>
 </div>
 <main>
@@ -142,13 +142,42 @@ function renderUpdate() {
   const bar = $('#updbar');
   if (!u.available && u.state !== 'downloading' && u.state !== 'restarting') { bar.hidden = true; return; }
   bar.hidden = false;
-  $('#updnotes').href = u.page || '#';
+
   $('#updbtn').disabled = !!u.state;
   $('#updtext').textContent =
     u.state === 'downloading' ? `Downloading Big Top ${u.latest}…` :
     u.state === 'restarting'  ? `Starting Big Top ${u.latest}…` :
     u.error ? `Big Top ${u.latest} is available (last try failed: ${u.error})` :
     `Big Top ${u.latest} is available (you have ${u.current}).`;
+}
+
+// release notes (GitHub markdown) shown here, lightly formatted: headings, bold, code, links, lists
+function mdLite(md) {
+  return esc(md || '').split('\n').map(line => {
+    let l = line
+      .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      .replace(/(^|[^*])\*([^*\s][^*]*?)\*(?!\*)/g, '$1<i>$2</i>')
+      .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener" style="color:var(--accent2)">$1</a>');
+    if (/^#{1,6}\s/.test(l)) return '<h4 style="margin:14px 0 4px">' + l.replace(/^#{1,6}\s/, '') + '</h4>';
+    if (/^\|[\s\-:|]+$/.test(line)) return '';   // a table's divider row
+    if (/^\|/.test(l)) return '<div style="font-size:13px;color:var(--dim)">' + l.replace(/\|/g, ' ').trim() + '</div>';
+    if (/^\s*[-*•]\s/.test(l)) return '<div style="margin-left:14px">• ' + l.replace(/^\s*[-*•]\s/, '') + '</div>';
+    return l.trim() ? '<p style="margin:6px 0">' + l + '</p>' : '';
+  }).join('');
+}
+function notesDialog() {
+  const u = state.update || {};
+  open(`
+    <h3>Big Top ${esc(u.latest || '')}</h3>
+    <div class="hint">You have ${esc(u.current || '')}.</div>
+    <div style="margin-top:10px">${u.notes ? mdLite(u.notes) : '<p class="hint">No notes came with this release.</p>'}</div>
+    <div class="actions">
+      ${u.page ? `<a href="${esc(u.page)}" target="_blank" rel="noopener" style="margin-right:auto;color:var(--accent2);align-self:center">Open on GitHub</a>` : ''}
+      <button id="ncancel">Close</button>${u.available && !u.state ? '<button class="primary" id="nupdate">Update now</button>' : ''}
+    </div>`);
+  $('#ncancel').onclick = close;
+  if ($('#nupdate')) $('#nupdate').onclick = () => { close(); $('#updbtn').click(); };
 }
 
 // after Update now: wait for the new version to answer, then reload the page from it
@@ -416,6 +445,7 @@ function settingsDialog() {
 // ---------- wiring ----------
 $('#addlib').onclick = () => libDialog(null);
 $('#setbtn').onclick = settingsDialog;
+$('#updnotes').onclick = ev => { ev.preventDefault(); notesDialog(); };
 $('#updbtn').onclick = async () => {
   try { await api('POST', '/admin/api/update'); $('#updbtn').disabled = true; $('#updtext').textContent = 'Downloading…';
         waitForNewVersion(state.version); }
