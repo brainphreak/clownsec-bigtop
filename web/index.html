@@ -83,7 +83,9 @@ dialog::backdrop { background: #000b; }
   <button id="quitbtn" title="Stop Big Top">Quit</button>
 </header>
 <div id="updbar" hidden style="background:var(--panel2);border-bottom:1px solid var(--line);padding:10px 22px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-  <span id="updtext"></span><div class="grow"></div>
+  <span id="updtext"></span>
+  <div id="updprog" class="bar" hidden style="width:180px;margin:0"><div></div></div>
+  <div class="grow"></div>
   <a id="updnotes" href="#" style="color:var(--accent2)">What's new</a>
   <button class="primary" id="updbtn">Update now</button>
 </div>
@@ -144,8 +146,12 @@ function renderUpdate() {
   bar.hidden = false;
 
   $('#updbtn').disabled = !!u.state;
+  const mb = n => (n / 1048576).toFixed(1);
+  const pct = u.total ? Math.floor(100 * (u.done || 0) / u.total) : 0;
+  $('#updprog').hidden = u.state !== 'downloading';
+  $('#updprog div').style.width = pct + '%';
   $('#updtext').textContent =
-    u.state === 'downloading' ? `Downloading Big Top ${u.latest}…` :
+    u.state === 'downloading' ? `Downloading Big Top ${u.latest}… ${pct}% (${mb(u.done || 0)} of ${mb(u.total || 0)} MB)` :
     u.state === 'restarting'  ? `Starting Big Top ${u.latest}…` :
     u.error ? `Big Top ${u.latest} is available (last try failed: ${u.error})` :
     `Big Top ${u.latest} is available (you have ${u.current}).`;
@@ -182,14 +188,14 @@ function notesDialog() {
 
 // after Update now: wait for the new version to answer, then reload the page from it
 async function waitForNewVersion(oldVersion) {
-  for (let i = 0; i < 120; i++) {
-    await new Promise(r => setTimeout(r, 1500));
+  for (let i = 0; i < 240; i++) {
+    await new Promise(r => setTimeout(r, 750));
     try {
       const st = await api('GET', '/admin/api/state');
       if (st.version !== oldVersion) { location.reload(); return; }
       state = st; renderUpdate();
       if (!st.update.state && st.update.error) return;   // the download failed: the banner says why
-    } catch (e) { $('#updtext').textContent = 'Restarting Big Top…'; }
+    } catch (e) { $('#updprog').hidden = true; $('#updtext').textContent = 'Starting the new Big Top… this page reloads by itself.'; }
   }
 }
 

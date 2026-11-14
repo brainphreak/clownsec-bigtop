@@ -35,6 +35,7 @@ func main() {
 	noBrowser := flag.Bool("no-browser", false, "don't open the setup page on start")
 	replaces := flag.String("replaces", "", "") // set by the updater: the old build to wait for and remove
 	flag.Parse()
+	fixConsole()
 
 	fmt.Printf("Clownsec Big Top %s\n", version)
 	dir, err := config.DataDir(*dataFlag)
@@ -118,8 +119,19 @@ func main() {
 	}()
 
 	page := fmt.Sprintf("http://localhost:%d/", port)
-	fmt.Printf("Data folder: %s\nSetup page:  %s\n", dir, page)
-	fmt.Println("Keep this window open while you watch. Close it to stop Big Top.")
+	// say plainly that it's up: after an update this is a fresh window nobody opened by hand
+	fmt.Printf("\n  Big Top %s is running.\n\n", version)
+	fmt.Printf("  Setup page:  %s\n", page)
+	for _, a := range lanAddrs() {
+		if port != config.DefaultPort {
+			a += ":" + strconv.Itoa(port)
+		}
+		fmt.Printf("  On the 3DS:  BIG TOP > Find servers, or enter %s\n", a)
+	}
+	fmt.Printf("  Data folder: %s\n\n", dir)
+	fmt.Println("  Keep this window open while you watch. Close it to stop Big Top.")
+	fmt.Println()
+	setTitle("Clownsec Big Top " + version + " - running")
 
 	// look for new and changed files now and every half hour (unchanged files cost a stat each)
 	go func() {
@@ -153,4 +165,16 @@ func fatal(f string, a ...any) {
 		fmt.Scanln()
 	}
 	os.Exit(1)
+}
+
+// the addresses a 3DS can be given (the same list the setup page shows)
+func lanAddrs() []string {
+	var out []string
+	ifs, _ := net.InterfaceAddrs()
+	for _, a := range ifs {
+		if n, ok := a.(*net.IPNet); ok && n.IP.To4() != nil && !n.IP.IsLoopback() && !n.IP.IsLinkLocalUnicast() {
+			out = append(out, n.IP.String())
+		}
+	}
+	return out
 }

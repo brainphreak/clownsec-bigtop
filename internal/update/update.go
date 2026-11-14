@@ -30,8 +30,10 @@ type Status struct {
 	Latest    string `json:"latest,omitempty"`
 	Available bool   `json:"available"`
 	Notes     string `json:"notes,omitempty"`
-	Page      string `json:"page,omitempty"` // the release's web page
-	State     string `json:"state"`          // "", "checking", "downloading", "restarting"
+	Page      string `json:"page,omitempty"`  // the release's web page
+	State     string `json:"state"`           // "", "checking", "downloading", "restarting"
+	Done      int64  `json:"done,omitempty"`  // downloading: bytes so far
+	Total     int64  `json:"total,omitempty"` // ...of this many
 	Error     string `json:"error,omitempty"`
 	Checked   int64  `json:"checked,omitempty"`
 }
@@ -196,7 +198,7 @@ func (u *Updater) Download() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	u.set(func(s *Status) { s.State, s.Error = "downloading", "" })
+	u.set(func(s *Status) { s.State, s.Error, s.Done, s.Total = "downloading", "", 0, a.Size })
 	fail := func(err error) (string, error) {
 		u.set(func(s *Status) { s.State, s.Error = "", err.Error() })
 		return "", err
@@ -234,7 +236,7 @@ func (u *Updater) Download() (string, error) {
 		return fail(fmt.Errorf("can't write next to Big Top (%v)", err))
 	}
 	h := sha256.New()
-	n, err := io.Copy(io.MultiWriter(f, h), resp.Body)
+	n, err := io.Copy(io.MultiWriter(f, h, &progress{u}), resp.Body)
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
@@ -254,6 +256,14 @@ func (u *Updater) Download() (string, error) {
 		return fail(err)
 	}
 	return dest, nil
+}
+
+// progress counts the download for the setup page's bar
+type progress struct{ u *Updater }
+
+func (p *progress) Write(b []byte) (int, error) {
+	p.u.set(func(s *Status) { s.Done += int64(len(b)) })
+	return len(b), nil
 }
 
 func (u *Updater) get(url string) ([]byte, error) {
