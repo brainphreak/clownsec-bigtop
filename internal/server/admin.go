@@ -37,6 +37,9 @@ func (s *Server) adminRoutes(m *http.ServeMux) {
 	a("PUT /admin/api/shows/{id}", s.adEditShow)
 	a("POST /admin/api/shows/{id}/poster", s.adShowPoster)
 	a("GET /admin/api/catalog", s.adCatalogSearch)
+	a("POST /admin/api/update/check", s.adUpdateCheck)
+	a("POST /admin/api/update", s.adUpdate)
+	a("POST /admin/api/quit", s.adQuit)
 	// the page shows posters through the same URLs the 3DS uses
 }
 
@@ -100,7 +103,43 @@ func (s *Server) adState(w http.ResponseWriter, r *http.Request) {
 		"name": c.Name, "id": c.ID, "port": c.Port, "allowRemoteAdmin": c.AllowRemoteAdmin,
 		"version": s.Version, "addresses": lanAddresses(c.Port), "libraries": libs,
 		"scan": s.Scanner.Status(), "catalog": map[string]int{"movies": cm, "shows": cs},
+		"update": s.Updater.Status(),
 	})
+}
+
+func (s *Server) adUpdateCheck(w http.ResponseWriter, r *http.Request) {
+	if err := s.Updater.Check(); err != nil {
+		http.Error(w, "Couldn't check for updates: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, s.Updater.Status())
+}
+
+// Update: download, verify, start the new build, exit. The page watches /admin/api/state until
+// the new version answers.
+func (s *Server) adUpdate(w http.ResponseWriter, r *http.Request) {
+	if !s.Updater.Status().Available {
+		bad(w, "No update is available.")
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
+	go func() {
+		p, err := s.Updater.Download()
+		if err != nil {
+			log.Printf("update: %v", err)
+			return
+		}
+		s.Updater.MarkRestarting()
+		log.Printf("update: starting %s", filepath.Base(p))
+		if err := s.Restart(p); err != nil {
+			log.Printf("update: couldn't start the new version: %v", err)
+		}
+	}()
+}
+
+func (s *Server) adQuit(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNoContent)
+	go func() { time.Sleep(300 * time.Millisecond); s.Quit() }()
 }
 
 // the addresses a 3DS can type in (ENTER ADDRESS), if discovery doesn't find this server

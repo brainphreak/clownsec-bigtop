@@ -80,7 +80,13 @@ dialog::backdrop { background: #000b; }
   <span class="status" id="scanline"></span>
   <button id="scanbtn">Scan for new videos</button>
   <button id="setbtn">Settings</button>
+  <button id="quitbtn" title="Stop Big Top">Quit</button>
 </header>
+<div id="updbar" hidden style="background:var(--panel2);border-bottom:1px solid var(--line);padding:10px 22px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+  <span id="updtext"></span><div class="grow"></div>
+  <a id="updnotes" href="#" target="_blank" rel="noopener" style="color:var(--accent2)">What's new</a>
+  <button class="primary" id="updbtn">Update now</button>
+</div>
 <main>
   <div class="bar" id="scanbar" hidden><div></div></div>
 
@@ -127,7 +133,35 @@ async function loadState() {
       : sc.last ? `Last scan ${new Date(sc.last * 1000).toLocaleTimeString()}` + (sc.added ? ` · ${sc.added} new` : '') : '';
   }
   renderLibs();
+  renderUpdate();
   return sc.running;
+}
+
+function renderUpdate() {
+  const u = state.update || {};
+  const bar = $('#updbar');
+  if (!u.available && u.state !== 'downloading' && u.state !== 'restarting') { bar.hidden = true; return; }
+  bar.hidden = false;
+  $('#updnotes').href = u.page || '#';
+  $('#updbtn').disabled = !!u.state;
+  $('#updtext').textContent =
+    u.state === 'downloading' ? `Downloading Big Top ${u.latest}…` :
+    u.state === 'restarting'  ? `Starting Big Top ${u.latest}…` :
+    u.error ? `Big Top ${u.latest} is available (last try failed: ${u.error})` :
+    `Big Top ${u.latest} is available (you have ${u.current}).`;
+}
+
+// after Update now: wait for the new version to answer, then reload the page from it
+async function waitForNewVersion(oldVersion) {
+  for (let i = 0; i < 120; i++) {
+    await new Promise(r => setTimeout(r, 1500));
+    try {
+      const st = await api('GET', '/admin/api/state');
+      if (st.version !== oldVersion) { location.reload(); return; }
+      state = st; renderUpdate();
+      if (!st.update.state && st.update.error) return;   // the download failed: the banner says why
+    } catch (e) { $('#updtext').textContent = 'Restarting Big Top…'; }
+  }
 }
 
 function renderLibs() {
@@ -358,11 +392,20 @@ function settingsDialog() {
     <label><input type="checkbox" id="sremote" style="width:auto" ${state.allowRemoteAdmin ? 'checked' : ''}>
       Allow this setup page from other computers on the network</label>
     <div class="hint">Off: only this computer can change libraries and edit info. Watching from a 3DS works either way.</div>
-    <p class="hint">Version ${esc(state.version)} · Clownsec catalog: ${state.catalog.movies} movies, ${state.catalog.shows} shows ·
+    <p class="hint">Version ${esc(state.version)} · <a href="#" id="updcheck" style="color:var(--accent2)">check for updates</a>
+      <span id="updres"></span></p>
+    <p class="hint">Clownsec catalog: ${state.catalog.movies} movies, ${state.catalog.shows} shows ·
       <a href="#" id="refresh" style="color:var(--accent2)">re-read every file's info</a></p>
     <div class="err" id="xerr"></div>
     <div class="actions"><button id="xcancel">Cancel</button><button class="primary" id="xsave">Save</button></div>`);
   $('#xcancel').onclick = close;
+  $('#updcheck').onclick = async ev => {
+    ev.preventDefault(); $('#updres').textContent = ' checking…';
+    try { const u = await api('POST', '/admin/api/update/check');
+          $('#updres').textContent = u.available ? ` — ${u.latest} is available (see the bar at the top)` : ' — this is the latest version';
+          await loadState(); }
+    catch (x) { $('#updres').textContent = ' — ' + x.message; }
+  };
   $('#refresh').onclick = async ev => { ev.preventDefault(); await api('POST', '/admin/api/scan?refresh=1'); close(); poll(); };
   $('#xsave').onclick = async () => {
     try { await api('PUT', '/admin/api/settings', { name: $('#sname').value, allowRemoteAdmin: $('#sremote').checked }); close(); refresh(); }
@@ -373,6 +416,16 @@ function settingsDialog() {
 // ---------- wiring ----------
 $('#addlib').onclick = () => libDialog(null);
 $('#setbtn').onclick = settingsDialog;
+$('#updbtn').onclick = async () => {
+  try { await api('POST', '/admin/api/update'); $('#updbtn').disabled = true; $('#updtext').textContent = 'Downloading…';
+        waitForNewVersion(state.version); }
+  catch (x) { $('#updtext').textContent = x.message; }
+};
+$('#quitbtn').onclick = async () => {
+  if (!confirm('Stop Big Top? The 3DS can\'t watch until you start it again.')) return;
+  try { await api('POST', '/admin/api/quit'); } catch (e) {}
+  document.body.innerHTML = '<main><h2>Big Top has stopped.</h2><p class="hint">Start it again to keep watching.</p></main>';
+};
 $('#scanbtn').onclick = async () => { await api('POST', '/admin/api/scan'); poll(); };
 $('#search').oninput = renderGrid;
 

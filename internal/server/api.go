@@ -17,6 +17,7 @@ import (
 	"github.com/brainphreak/clownsec-bigtop/internal/library"
 	"github.com/brainphreak/clownsec-bigtop/internal/poster"
 	"github.com/brainphreak/clownsec-bigtop/internal/scan"
+	"github.com/brainphreak/clownsec-bigtop/internal/update"
 )
 
 type Server struct {
@@ -26,6 +27,9 @@ type Server struct {
 	Posters *poster.Store
 	Catalog *catalog.Catalog
 	Version string
+	Updater *update.Updater
+	Quit    func()                     // stop Big Top (the setup page's Quit button)
+	Restart func(newPath string) error // start this new build and exit (after an update)
 }
 
 func (s *Server) Handler() http.Handler {

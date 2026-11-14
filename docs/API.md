@@ -147,6 +147,12 @@ unless *Allow this setup page from other computers* is on; otherwise `403`.
 | PUT | `/admin/api/shows/{id}` | an Info object | a show's edits |
 | POST | `/admin/api/shows/{id}/poster` | JPEG/PNG bytes | a show's poster |
 | GET | `/admin/api/catalog?q=` | | search the Clownsec catalog (up to 30) |
+| POST | `/admin/api/update/check` | | check GitHub now; → the update status |
+| POST | `/admin/api/update` | | download, verify and start the newer release, then exit; → `202` |
+| POST | `/admin/api/quit` | | stop Big Top; → `204` |
+
+`/admin/api/state` includes `update`: `{"current","latest","available","notes","page","state","error","checked"}`
+(`state` is `""`, `checking`, `downloading` or `restarting`).
 
 An **Info** object (detected values and edits use the same shape; empty / zero = unset):
 

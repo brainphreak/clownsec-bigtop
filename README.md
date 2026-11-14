@@ -59,7 +59,7 @@ Nothing else to install: Big Top is a single program file.
 | | |
 |---|---|
 | Console | **New 3DS / New 2DS XL** (the Old 3DS can't keep up with streamed moflex, 3D especially) |
-| Player | the [Clownsec player](https://github.com/brainphreak/clownsec-moflex-player) with the BIG TOP button (build 61114.30 or newer) |
+| Player | the [Clownsec player](https://github.com/brainphreak/clownsec-moflex-player) with the BIG TOP button (build 61114.31 or newer — it updates itself) |
 | Network | the same home Wi-Fi as the computer |
 
 Big Top is for your home network only — see [security](#network-ports-and-security).
@@ -77,7 +77,9 @@ file name, e.g. `ClownsecBigTop-261114.0306.exe`.
 | `ClownsecBigTop-<version>-windows.zip` (or the `.exe`) | Windows 10 / 11, 64-bit |
 | `clownsec-bigtop-<version>-macos-arm64` | Macs with Apple silicon (M1 and later) |
 | `clownsec-bigtop-<version>-macos-intel` | Macs with an Intel processor |
-| `clownsec-bigtop-<version>-linux-amd64` | 64-bit Linux on a PC |
+| `clownsec-bigtop-<version>-x86_64.AppImage` | 64-bit Linux, as an AppImage |
+| `clownsec-bigtop-<version>-linux-amd64` | 64-bit Linux, the plain program |
+| `SHA256SUMS.txt` | checksums of all of the above |
 
 ### Windows
 
@@ -106,12 +108,18 @@ as a generic "Trojan" by mistake. To allow it:
 
 ### Linux
 
+Either the **AppImage** (make it executable and double-click it, or run it):
+
 ```sh
-chmod +x clownsec-bigtop-<version>-linux-amd64
-./clownsec-bigtop-<version>-linux-amd64
+chmod +x clownsec-bigtop-<version>-x86_64.AppImage
+./clownsec-bigtop-<version>-x86_64.AppImage
 ```
 
-It's a statically linked executable: no libraries to install. If a firewall is running, open TCP
+or the plain program, the same way (`clownsec-bigtop-<version>-linux-amd64`). Both are
+self-contained — no libraries to install. Started by double-click, the AppImage has no window: use
+the setup page's **Quit** button to stop it. (An AppImage needs FUSE, which most desktop
+distributions have; if yours doesn't, run it with `--appimage-extract-and-run`, or use the plain
+program.) If a firewall is running, open TCP
 32500 and UDP 32501 to your local network (e.g. with ufw:
 `sudo ufw allow from 192.168.0.0/16 to any port 32500 proto tcp`, and the same for `32501 proto udp`).
 
@@ -120,8 +128,21 @@ It's a statically linked executable: no libraries to install. If a firewall is r
 It opens by itself at **http://localhost:32500**. Open it again any time in a browser on the same
 computer. At the top it shows the server's name and the address a 3DS can use.
 
-Big Top runs until you close its window (or press Ctrl+C). There is no installer and nothing runs
-in the background — start it when you want to watch.
+Big Top runs until you close its window, press Ctrl+C, or press **Quit** in the setup page. There
+is no installer and nothing starts by itself — start Big Top when you want to watch.
+
+### Updates
+
+Big Top checks GitHub for a new release when it starts and twice a day. When there is one, the
+setup page shows a bar at the top — **Update now** downloads the build for your system next to the
+current one, checks it against the release's `SHA256SUMS.txt`, starts it and closes the old one
+(whose file is then removed). Libraries, edits and watch progress live in the data folder and carry
+over. Nothing updates without the click: a restart would interrupt anyone watching.
+**Settings → check for updates** checks straight away.
+
+On Windows the new version opens in a new window; on a Mac running Big Top in Terminal, in a new
+Terminal window. Otherwise (Linux, an AppImage) it carries on in the background, logging to
+`bigtop.log` in the data folder — stop it with **Quit**.
 
 ---
 
@@ -317,7 +338,8 @@ buffer; the button changes at once and the switch happens when you stop pressing
 - **Watching needs no login**: anything on your network that can reach port 32500 can list and play
   your videos. That's normal for a home media box, and why **Big Top must not be exposed to the
   internet** — don't forward its ports on your router.
-- Big Top's only outgoing requests are to clownsec.com (the catalog and its artwork).
+- Big Top's only outgoing requests are to clownsec.com (the catalog and its artwork) and to GitHub
+  (checking for, and downloading, updates).
 
 ---
 
@@ -335,6 +357,7 @@ buffer; the button changes at once and the switch happens when you stop pressing
 | `bigtop.json` | libraries, every video's detected info and your edits, shows, watch progress |
 | `catalog.json` | the cached Clownsec catalog (refreshed daily) |
 | `posters/` | posters, and resized copies in `posters/sized/` |
+| `bigtop.log` | output of a Big Top restarted in the background by an update (Linux / AppImage) |
 
 Back up the folder to keep your edits and watch history; delete it to start over. If `bigtop.json`
 is ever unreadable, it's set aside (renamed `.broken-<date>`) rather than overwritten.
@@ -376,7 +399,12 @@ Needs [Go](https://go.dev) 1.22 or newer. No other dependencies.
 ```
 
 builds Windows, macOS (Apple silicon and Intel) and Linux binaries into `dist/`, the version in each
-file name, plus a zip of the Windows build. `go run .` runs it straight from the source.
+file name, plus a zip of the Windows build, a Linux AppImage (needs `mksquashfs` — on macOS
+`brew install squashfs`; the AppImage runtime is downloaded once into `.cache/`) and
+`SHA256SUMS.txt`. `go run .` runs it straight from the source (a `dev` build never updates itself).
+
+A release is a GitHub release tagged `v<version>` carrying every file in `dist/` — the updater
+picks its file by name and refuses one whose checksum isn't in `SHA256SUMS.txt`.
 
 ```
 main.go                  start-up, opening the browser, shutdown
@@ -388,6 +416,7 @@ internal/moflex          reading a SUPER MOFLEX trailer (info, poster, track lan
 internal/poster          storing and resizing posters
 internal/server          the HTTP API for the 3DS, the setup page's API, subtitle files
 internal/discovery       answering the 3DS's "is there a Big Top here?"
+internal/update          checking GitHub releases, downloading and verifying an update
 web/index.html           the setup page (built into the program)
 ```
 
@@ -403,6 +432,7 @@ The HTTP interface is described in [docs/API.md](docs/API.md).
 - **Online info** for files the Clownsec catalog doesn't know: TMDB / TVDB.
 - Your own artwork beside the videos (`Movie.jpg`, `poster.jpg`) picked up automatically.
 - A tray icon instead of a console window on Windows; code signing.
+- A sharper icon.
 
 ---
 
