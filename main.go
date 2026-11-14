@@ -10,7 +10,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
 	"runtime"
 	"strconv"
@@ -100,19 +99,6 @@ func main() {
 	if err := hs.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		fatal("server: %v", err)
 	}
-}
-
-func openBrowser(u string) {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "windows":
-		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", u)
-	case "darwin":
-		cmd = exec.Command("open", u)
-	default:
-		cmd = exec.Command("xdg-open", u)
-	}
-	cmd.Start()
 }
 
 // fatal explains and waits: on Windows the window would otherwise vanish before it can be read.
