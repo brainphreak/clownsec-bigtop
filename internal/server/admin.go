@@ -115,7 +115,6 @@ func lanAddresses(port int) []string {
 	return out
 }
 
-
 func (s *Server) adSettings(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Name             *string `json:"name"`

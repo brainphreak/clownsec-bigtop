@@ -4,8 +4,8 @@ import "testing"
 
 func TestParseName(t *testing.T) {
 	cases := []struct {
-		in      string
-		want    Parsed
+		in   string
+		want Parsed
 	}{
 		{"Cabaret.1972.1080P.Bluray.X265-Lama Lrf Full Sbs_400x240_1400kbps_23.976fps_2pass.moflex",
 			Parsed{Title: "Cabaret", Year: 1972, Is3D: 1, Layout: "full-sbs"}},

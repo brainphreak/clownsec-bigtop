@@ -22,6 +22,7 @@ import (
 	"image"
 	"image/color"
 	"io"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -39,7 +40,7 @@ type Super struct {
 
 // Title etc. read NFO0 fields with the conversions every caller wants.
 func (s *Super) Field(k string) string { return strings.TrimSpace(s.Info[k]) }
-func (s *Super) Int(k string) int     { n, _ := strconv.Atoi(s.Field(k)); return n }
+func (s *Super) Int(k string) int      { n, _ := strconv.Atoi(s.Field(k)); return n }
 
 // ErrNotSuper means the file has no CSXTRA trailer (a plain moflex).
 var ErrNotSuper = errors.New("not a super moflex")
@@ -149,4 +150,22 @@ func rgb565(b []byte) image.Image {
 		img.SetRGBA(i%w, i/w, color.RGBA{r<<3 | r>>2, g<<2 | g>>4, bl<<3 | bl>>2, 255})
 	}
 	return img
+}
+
+// make_super_moflex writes an episode's summary as `S1.E2 “Episode Title” - synopsis`.
+var reEpDesc = regexp.MustCompile(`^S(\d{1,2})\.E(\d{1,3})\s*(?:[“"](.*?)[”"])?\s*(?:-\s*)?`)
+
+// EpisodeFromDesc reads season, episode and episode title out of such a summary, and returns the
+// synopsis without that prefix. ok = the prefix was there.
+func EpisodeFromDesc(desc string) (season, episode int, title, rest string, ok bool) {
+	m := reEpDesc.FindStringSubmatchIndex(desc)
+	if m == nil {
+		return 0, 0, "", desc, false
+	}
+	season, _ = strconv.Atoi(desc[m[2]:m[3]])
+	episode, _ = strconv.Atoi(desc[m[4]:m[5]])
+	if m[6] >= 0 {
+		title = strings.TrimSpace(desc[m[6]:m[7]])
+	}
+	return season, episode, title, strings.TrimSpace(desc[m[1]:]), true
 }

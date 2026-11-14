@@ -275,6 +275,7 @@ func (sc *Scanner) identify(it *library.Item) {
 
 	// a super moflex says what it is itself
 	var sup *moflex.Super
+	showDesc := ""
 	if f, err := os.Open(it.Path); err == nil {
 		sup, _ = moflex.ReadSuper(f, it.Size)
 		f.Close()
@@ -290,7 +291,18 @@ func (sc *Scanner) identify(it *library.Item) {
 			}
 			if d := sup.Field("desc"); d != "" {
 				det.Summary = d
+				// the summary starts "S1.E2 “Title” -": the episode, even when the file name lost it
+				if se, ep, title, rest, ok := moflex.EpisodeFromDesc(d); ok {
+					det.Summary = rest
+					if det.Episode == 0 {
+						det.Season, det.Episode = se, ep
+					}
+					if det.EpTitle == "" && title != "" {
+						det.EpTitle, det.Title = title, title
+					}
+				}
 			}
+			showDesc = sup.Field("showdesc")
 		} else {
 			if t := sup.Field("title"); t != "" {
 				det.Title = t
@@ -344,6 +356,7 @@ func (sc *Scanner) identify(it *library.Item) {
 	defer sc.Store.Unlock()
 	it.Detected, it.Source, it.Catalog = det, source, catID
 	it.Super = sup != nil
+	it.ShowDesc = showDesc
 	if sup != nil {
 		it.Audio, it.AltAudio, it.Subs = sup.AudioLang, sup.AltAudio, sup.SubLangs
 	} else {
@@ -407,9 +420,18 @@ func (sc *Scanner) buildShows(lib *library.Library) {
 			sh = &library.Show{ID: id, Lib: lib.ID}
 		}
 		det := library.Info{Title: g.title, Year: g.year}
+		for _, ep := range g.eps { // a super moflex episode carries the show's description
+			if ep.ShowDesc != "" {
+				det.Summary = ep.ShowDesc
+				break
+			}
+		}
 		var art string
 		if e := sc.Catalog.Show(g.title); e != nil {
-			det.Summary, det.Genres = e.Description, strings.Join(e.Genres, ", ")
+			if e.Description != "" {
+				det.Summary = e.Description
+			}
+			det.Genres = strings.Join(e.Genres, ", ")
 			if det.Year == 0 {
 				det.Year = e.Year
 			}

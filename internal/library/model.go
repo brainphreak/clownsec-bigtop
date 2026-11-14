@@ -21,7 +21,7 @@ type Info struct {
 	Title    string `json:"title,omitempty"`
 	Year     int    `json:"year,omitempty"`
 	Summary  string `json:"summary,omitempty"`
-	Genres   string `json:"genres,omitempty"` // "Animation, Family"
+	Genres   string `json:"genres,omitempty"`  // "Animation, Family"
 	Runtime  int    `json:"runtime,omitempty"` // minutes
 	Is3D     string `json:"is3d,omitempty"`    // "", "2d", "3d" (moflex: stereo is in the file), "hsbs", "fsbs" (other formats: how the frame splits)
 	Show     string `json:"show,omitempty"`    // episodes: the show's title
@@ -81,16 +81,17 @@ type Item struct {
 	Missing     int64  `json:"missing,omitempty"` // unix time the file was last not found (0 = present)
 	Added       int64  `json:"added"`
 
-	Detected Info   `json:"detected"`
-	Edit     Info   `json:"edit"`
-	Source   string `json:"source"`            // where Detected came from: "super", "catalog", "filename"
-	Catalog  string `json:"catalog,omitempty"` // matched Clownsec catalog entry id
-	Super    bool   `json:"super,omitempty"`
-	Audio    string `json:"audio,omitempty"`    // in-band audio language ("ENG")
-	AltAudio string `json:"altAudio,omitempty"` // the trailer's second audio track
-	Subs     []string `json:"subs,omitempty"`   // trailer subtitle languages
-	Poster   string `json:"poster,omitempty"`   // file in the posters folder
-	PosterBy string `json:"posterBy,omitempty"` // "super", "catalog", "user"
+	Detected Info     `json:"detected"`
+	Edit     Info     `json:"edit"`
+	Source   string   `json:"source"`            // where Detected came from: "super", "catalog", "filename"
+	Catalog  string   `json:"catalog,omitempty"` // matched Clownsec catalog entry id
+	Super    bool     `json:"super,omitempty"`
+	Audio    string   `json:"audio,omitempty"`    // in-band audio language ("ENG")
+	AltAudio string   `json:"altAudio,omitempty"` // the trailer's second audio track
+	Subs     []string `json:"subs,omitempty"`     // trailer subtitle languages
+	ShowDesc string   `json:"showDesc,omitempty"` // a super moflex episode: its show's description
+	Poster   string   `json:"poster,omitempty"`   // file in the posters folder
+	PosterBy string   `json:"posterBy,omitempty"` // "super", "catalog", "user"
 }
 
 // Stereo3D: any of the 3D values.

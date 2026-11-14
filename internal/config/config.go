@@ -21,8 +21,8 @@ type Config struct {
 	mu   sync.Mutex
 	path string
 
-	Name             string `json:"name"`             // shown on the 3DS server list
-	ID               string `json:"id"`               // stable: the 3DS keys its settings by it
+	Name             string `json:"name"` // shown on the 3DS server list
+	ID               string `json:"id"`   // stable: the 3DS keys its settings by it
 	Port             int    `json:"port"`
 	AllowRemoteAdmin bool   `json:"allowRemoteAdmin"` // the setup page from other computers (off: this PC only)
 }

@@ -10,10 +10,10 @@ import (
 
 // DB is everything Big Top remembers, saved as one JSON file in its data folder.
 type DB struct {
-	Libraries []*Library                       `json:"libraries"`
-	Items     map[string]*Item                 `json:"items"`
-	Shows     map[string]*Show                 `json:"shows"`
-	Progress  map[string]map[string]*Progress  `json:"progress"` // console id -> item id -> place
+	Libraries []*Library                      `json:"libraries"`
+	Items     map[string]*Item                `json:"items"`
+	Shows     map[string]*Show                `json:"shows"`
+	Progress  map[string]map[string]*Progress `json:"progress"` // console id -> item id -> place
 }
 
 // Store guards the DB and writes it back. Readers take RLock; anything that changes it takes

@@ -63,3 +63,13 @@ func TestPlainMoflex(t *testing.T) {
 		t.Fatalf("want ErrNotSuper, got %v", err)
 	}
 }
+
+func TestEpisodeFromDesc(t *testing.T) {
+	s, e, title, rest, ok := EpisodeFromDesc("S2.E5 \u201cWar\u201d - The war begins.")
+	if !ok || s != 2 || e != 5 || title != "War" || rest != "The war begins." {
+		t.Fatalf("got %d %d %q %q %v", s, e, title, rest, ok)
+	}
+	if _, _, _, rest, ok := EpisodeFromDesc("A plain movie summary."); ok || rest != "A plain movie summary." {
+		t.Fatalf("plain: %v %q", ok, rest)
+	}
+}
