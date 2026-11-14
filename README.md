@@ -11,12 +11,12 @@ your home network.
 
 ## Running it
 
-**Windows:** download `ClownsecBigTop.exe` and double-click it. When Windows Firewall asks, allow
+**Windows:** download `ClownsecBigTop-<version>.exe` and double-click it. When Windows Firewall asks, allow
 it on **private networks** — the 3DS needs to reach it. A window stays open while Big Top runs;
 close it to stop the server.
 
-**macOS / Linux:** run `clownsec-bigtop-macos-arm64` (Apple silicon), `clownsec-bigtop-macos-intel`
-or `clownsec-bigtop-linux-amd64` from a terminal.
+**macOS / Linux:** run `clownsec-bigtop-<version>-macos-arm64` (Apple silicon), `...-macos-intel`
+or `...-linux-amd64` from a terminal.
 
 The setup page opens in your browser (`http://localhost:32500`). Add a library, pick its folders,
 and Big Top scans them. It rescans every half hour, or press **Scan for new videos**.
@@ -54,7 +54,8 @@ A moved or renamed file is recognised and keeps its info and watch history.
 
 ## Building
 
-Needs Go 1.22+. `./build.sh` builds Windows, macOS and Linux binaries into `dist/`.
+Needs Go 1.22+. `./build.sh` builds Windows, macOS and Linux binaries into `dist/`, the build
+version (date.time) in each file name.
 No other dependencies.
 
 ## License
