@@ -40,6 +40,8 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("GET /api/items/{id}", s.apiItem)
 	m.HandleFunc("GET /api/items/{id}/poster", s.apiItemPoster)
 	m.HandleFunc("GET /api/items/{id}/file", s.apiFile)
+	m.HandleFunc("GET /api/items/{id}/subs", s.apiSubs)
+	m.HandleFunc("GET /api/items/{id}/subs/{n}", s.apiSubFile)
 	m.HandleFunc("POST /api/items/{id}/progress", s.apiProgress)
 	m.HandleFunc("POST /api/items/{id}/watched", s.apiWatched)
 	// ---- the setup page ----

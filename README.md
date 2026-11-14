@@ -45,6 +45,22 @@ Big Top keeps all of this in its own data folder and never writes next to your v
 
 A moved or renamed file is recognised and keeps its info and watch history.
 
+### Subtitle files
+
+Put them next to the video, named after it (the same names Plex and the 3DS player use):
+
+```
+Movie.moflex
+Movie.srt              the default track (.srt, .ass or .ssa)
+Movie.en.srt           a language
+Movie.ja.ass           ASS keeps its styling
+Movie.en.forced.srt    forced lines only
+```
+
+The 3DS fetches them when the video starts: the default (or your preferred language) shows
+automatically, and the CC menu's "Load subtitle file..." lists the rest. Subtitles inside a SUPER
+MOFLEX work as they always do.
+
 ## Network
 
 | Port | |
