@@ -472,7 +472,7 @@ function renderFF() {
     $('#fftext').textContent = 'The FFmpeg download didn\'t work: ' + f.error;
   } else {
     $('#fftext').textContent = 'MP4, MKV and AVI videos need FFmpeg to play on the 3DS (moflex doesn\'t). ' +
-      (f.canDownload ? 'Big Top can download it for you (about 115 MB).' : (f.hint || '') + ', then restart Big Top.');
+      (f.problem ? f.problem + '.' : f.canDownload ? 'Big Top can download it for you (about 115 MB).' : (f.hint || '') + ', then restart Big Top.');
   }
 }
 $('#ffbtn').onclick = async () => {

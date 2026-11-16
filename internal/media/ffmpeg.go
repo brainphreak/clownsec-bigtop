@@ -28,7 +28,8 @@ type Status struct {
 	Version     string `json:"version,omitempty"`
 	CanDownload bool   `json:"canDownload"` // Big Top can fetch it on this system
 	Hint        string `json:"hint,omitempty"`
-	State       string `json:"state,omitempty"` // "", "downloading", "unpacking"
+	Problem     string `json:"problem,omitempty"` // found something that can't be used, and why
+	State       string `json:"state,omitempty"`   // "", "downloading", "unpacking"
 	Done        int64  `json:"done,omitempty"`
 	Total       int64  `json:"total,omitempty"`
 	Error       string `json:"error,omitempty"`
@@ -41,6 +42,7 @@ type Tool struct {
 	ffmpeg  string
 	ffprobe string
 	version string
+	problem string
 	checked time.Time
 	st      Status
 }
@@ -89,14 +91,38 @@ func (t *Tool) Paths() (ffmpeg, ffprobe string) {
 		return t.ffmpeg, t.ffprobe
 	}
 	t.checked = time.Now()
-	t.ffmpeg, t.ffprobe, t.version = "", "", ""
+	t.ffmpeg, t.ffprobe, t.version, t.problem = "", "", "", ""
+	// ffprobe beside ffmpeg first (a matched pair); failing that, any ffprobe that can be found:
+	// a static ffmpeg dropped in ~/bin often comes without one while the distro's is in /usr/bin,
+	// and the snap names it "ffmpeg.ffprobe"
 	for _, c := range t.candidates("ffmpeg") {
 		if isFile(c) {
-			p := filepath.Join(filepath.Dir(c), exe("ffprobe"))
-			if isFile(p) {
+			if p := filepath.Join(filepath.Dir(c), exe("ffprobe")); isFile(p) {
 				t.ffmpeg, t.ffprobe = c, p
 				break
 			}
+			if t.ffmpeg == "" {
+				t.ffmpeg = c
+			}
+		}
+	}
+	if t.ffmpeg != "" && t.ffprobe == "" {
+		probes := t.candidates("ffprobe")
+		if runtime.GOOS != "windows" {
+			if p, err := exec.LookPath("ffmpeg.ffprobe"); err == nil {
+				probes = append(probes, p)
+			}
+			probes = append(probes, "/snap/bin/ffmpeg.ffprobe")
+		}
+		for _, p := range probes {
+			if isFile(p) {
+				t.ffprobe = p
+				break
+			}
+		}
+		if t.ffprobe == "" {
+			t.problem = "Found " + t.ffmpeg + " but not ffprobe, which comes with it. Install ffprobe (on most systems it is part of the ffmpeg package)"
+			t.ffmpeg = ""
 		}
 	}
 	if t.ffmpeg != "" {
@@ -104,13 +130,27 @@ func (t *Tool) Paths() (ffmpeg, ffprobe string) {
 		defer cancel()
 		cmd := exec.CommandContext(ctx, t.ffmpeg, "-hide_banner", "-version")
 		hideWindow(cmd)
-		if out, err := cmd.Output(); err == nil {
+		out, err := cmd.Output()
+		if err == nil {
 			line, _, _ := strings.Cut(string(out), "\n")
 			t.version = strings.TrimSpace(strings.TrimPrefix(line, "ffmpeg version "))
 			if i := strings.Index(t.version, " Copyright"); i > 0 {
 				t.version = t.version[:i]
 			}
 		} else {
+			msg := strings.TrimSpace(string(out))
+			if ee, ok := err.(*exec.ExitError); ok && len(ee.Stderr) > 0 {
+				msg = strings.TrimSpace(string(ee.Stderr))
+			}
+			if ctx.Err() != nil {
+				msg = "it didn't answer within 10 seconds"
+			} else if msg == "" {
+				msg = err.Error()
+			}
+			if len(msg) > 300 {
+				msg = msg[:300]
+			}
+			t.problem = "Found " + t.ffmpeg + " but it won't run: " + msg
 			t.ffmpeg, t.ffprobe = "", "" // there but won't run
 		}
 	}
@@ -125,7 +165,7 @@ func (t *Tool) Status() Status {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	st := t.st
-	st.Found, st.FFmpeg, st.Version = f != "", f, t.version
+	st.Found, st.FFmpeg, st.Version, st.Problem = f != "", f, t.version, t.problem
 	st.CanDownload = runtime.GOOS == "windows" && runtime.GOARCH == "amd64"
 	switch runtime.GOOS {
 	case "darwin":
