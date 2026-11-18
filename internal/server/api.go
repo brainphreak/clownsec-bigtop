@@ -48,6 +48,7 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("GET /api/items/{id}/poster", s.apiItemPoster)
 	m.HandleFunc("GET /api/items/{id}/file", s.apiFile)
 	m.HandleFunc("GET /api/items/{id}/stream.ts", s.apiStream)
+	m.HandleFunc("GET /api/items/{id}/stream.moflex", s.apiStreamMoflex)
 	m.HandleFunc("GET /api/items/{id}/subs", s.apiSubs)
 	m.HandleFunc("GET /api/items/{id}/subs/{n}", s.apiSubFile)
 	m.HandleFunc("POST /api/items/{id}/progress", s.apiProgress)

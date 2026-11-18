@@ -32,7 +32,7 @@ func (s *Server) mediaOf(id string) (*library.Item, *library.Media, string) {
 	if path == "" {
 		return nil, nil, ""
 	}
-	if m == nil || m.Probed != mtime {
+	if m == nil || m.Probed != mtime || m.Ver < library.ProbeVer {
 		pm, err := s.Media.Probe(path)
 		if err != nil {
 			log.Printf("ffprobe %s: %v", filepath.Base(path), err)
@@ -76,23 +76,76 @@ func (f flushWriter) Write(p []byte) (int, error) {
 //	audio  index into the item's audioTracks (default: the file's default track)
 //	burn   index into the item's burnSubs, drawn into the picture (default: none)
 func (s *Server) apiStream(w http.ResponseWriter, r *http.Request) {
+	j, ctx, done := s.startStream(w, r)
+	if done == nil {
+		return
+	}
+	defer done()
+	w.Header().Set("Content-Type", "video/mp2t")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	if err := s.Media.Transcode(ctx, j, flushWriter{w, http.NewResponseController(w)}); err != nil {
+		log.Printf("transcode %s: %v", filepath.Base(j.Path), err)
+	}
+}
+
+// GET /api/items/{id}/stream.moflex?t=ms&fmt=0|1|2&audio=n&burn=n&q=n
+//
+// The same video as stream.ts, encoded live to moflex for an Old 3DS (which can't decode H.264).
+// fmt picks the frame's shape (0 2D, 1 full side-by-side, 2 half side-by-side -> a 3D moflex);
+// q the MobiClip quantizer (lower = better and bigger). "at" is taken for t too.
+func (s *Server) apiStreamMoflex(w http.ResponseWriter, r *http.Request) {
+	if s.Media.MoflexEncoder() == "" {
+		http.Error(w, "The moflex encoder isn't installed on the Big Top computer", http.StatusServiceUnavailable)
+		return
+	}
+	j, ctx, done := s.startStream(w, r)
+	if done == nil {
+		return
+	}
+	defer done()
+	layout := ""
+	switch r.URL.Query().Get("fmt") {
+	case "1":
+		layout = "fsbs"
+	case "2":
+		layout = "hsbs"
+	}
+	q, _ := strconv.Atoi(r.URL.Query().Get("q"))
+	w.Header().Set("Content-Type", "video/x-moflex")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	if err := s.Media.TranscodeMoflex(ctx, j, layout, q, flushWriter{w, http.NewResponseController(w)}); err != nil {
+		log.Printf("moflex stream %s: %v", filepath.Base(j.Path), err)
+	}
+}
+
+// startStream: the job a stream request asks for, and this console's turn to run it (a stream it
+// already has going stops). done == nil: the request was answered (an error); else call done
+// when the stream ends.
+func (s *Server) startStream(w http.ResponseWriter, r *http.Request) (media.Job, context.Context, func()) {
+	var j media.Job
 	if !s.Media.Available() {
 		http.Error(w, "FFmpeg isn't installed on the Big Top computer", http.StatusServiceUnavailable)
-		return
+		return j, nil, nil
 	}
 	_, m, path := s.mediaOf(r.PathValue("id"))
 	if path == "" {
 		http.NotFound(w, r)
-		return
+		return j, nil, nil
 	}
 	if m == nil {
 		http.Error(w, "Big Top can't read this file", http.StatusUnsupportedMediaType)
-		return
+		return j, nil, nil
 	}
 	q := r.URL.Query()
-	t, _ := strconv.ParseInt(q.Get("t"), 10, 64)
+	ts := q.Get("t")
+	if ts == "" {
+		ts = q.Get("at")
+	}
+	t, _ := strconv.ParseInt(ts, 10, 64)
 	f, _ := strconv.Atoi(q.Get("fmt"))
-	j := media.Job{Path: path, Media: m, StartMs: t, Stereo: f != 0, Audio: -1, Burn: -1}
+	j = media.Job{Path: path, Media: m, StartMs: t, Stereo: f != 0, Audio: -1, Burn: -1}
 	if n, err := strconv.Atoi(q.Get("audio")); err == nil && n >= 0 && n < len(m.Audio) {
 		j.Audio = m.Audio[n].Index
 	}
@@ -107,7 +160,6 @@ func (s *Server) apiStream(w http.ResponseWriter, r *http.Request) {
 
 	client := clientID(r)
 	ctx, cancel := context.WithCancel(r.Context())
-	defer cancel()
 	tok := &streamTok{cancel}
 	running.Lock()
 	if prev := running.m[client]; prev != nil {
@@ -115,19 +167,13 @@ func (s *Server) apiStream(w http.ResponseWriter, r *http.Request) {
 	}
 	running.m[client] = tok
 	running.Unlock()
-	defer func() {
+	return j, ctx, func() {
+		cancel()
 		running.Lock()
 		if running.m[client] == tok {
 			delete(running.m, client)
 		}
 		running.Unlock()
-	}()
-
-	w.Header().Set("Content-Type", "video/mp2t")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(http.StatusOK)
-	if err := s.Media.Transcode(ctx, j, flushWriter{w, http.NewResponseController(w)}); err != nil {
-		log.Printf("transcode %s: %v", filepath.Base(path), err)
 	}
 }
 

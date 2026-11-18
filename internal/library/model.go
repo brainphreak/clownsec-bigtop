@@ -107,7 +107,13 @@ type Media struct {
 	Audio  []Track `json:"audio,omitempty"`
 	Subs   []Track `json:"subs,omitempty"`
 	Probed int64   `json:"probed"` // the file's mtime when probed
+	FpsNum int     `json:"fpsn,omitempty"` // frame rate (FpsNum/FpsDen), 0 = unknown
+	FpsDen int     `json:"fpsd,omitempty"`
+	Ver    int     `json:"ver,omitempty"` // what the probe recorded (older entries are probed again)
 }
+
+// ProbeVer: bump when Probe records something new, so entries from before are probed again.
+const ProbeVer = 1
 
 // Track is one audio or subtitle stream inside a file.
 type Track struct {

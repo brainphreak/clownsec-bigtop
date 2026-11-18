@@ -51,6 +51,8 @@ func parseProbe(out []byte) (*library.Media, error) {
 			SAR         string            `json:"sample_aspect_ratio"`
 			FieldOrder  string            `json:"field_order"`
 			Channels    int               `json:"channels"`
+			AvgRate     string            `json:"avg_frame_rate"`
+			RRate       string            `json:"r_frame_rate"`
 			Tags        map[string]string `json:"tags"`
 			Disposition map[string]int    `json:"disposition"`
 		} `json:"streams"`
@@ -61,7 +63,7 @@ func parseProbe(out []byte) (*library.Media, error) {
 	if err := json.Unmarshal(out, &pr); err != nil {
 		return nil, err
 	}
-	m := &library.Media{Video: -1}
+	m := &library.Media{Video: -1, Ver: library.ProbeVer}
 	if d, err := strconv.ParseFloat(pr.Format.Duration, 64); err == nil {
 		m.DurMs = int64(d * 1000)
 	}
@@ -85,6 +87,15 @@ func parseProbe(out []byte) (*library.Media, error) {
 				y, _ := strconv.ParseFloat(b, 64)
 				if x > 0 && y > 0 {
 					m.SAR = x / y
+				}
+			}
+			for _, r := range []string{s.AvgRate, s.RRate} { // avg first: r_frame_rate can be a field rate
+				a, b, ok := strings.Cut(r, "/")
+				n, _ := strconv.Atoi(a)
+				d, _ := strconv.Atoi(b)
+				if ok && n > 0 && d > 0 && float64(n)/float64(d) >= 5 && float64(n)/float64(d) <= 120 {
+					m.FpsNum, m.FpsDen = n, d
+					break
 				}
 			}
 			switch s.FieldOrder {
