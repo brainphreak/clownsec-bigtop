@@ -80,6 +80,7 @@ type Item struct {
 	Fingerprint string `json:"fp"`
 	Missing     int64  `json:"missing,omitempty"` // unix time the file was last not found (0 = present)
 	Added       int64  `json:"added"`
+	Checked3D   bool   `json:"c3d,omitempty"` // a moflex whose own frames were checked for 3D (once)
 
 	Detected Info     `json:"detected"`
 	Edit     Info     `json:"edit"`
@@ -106,7 +107,7 @@ type Media struct {
 	Interl bool    `json:"interlaced,omitempty"` // needs deinterlacing
 	Audio  []Track `json:"audio,omitempty"`
 	Subs   []Track `json:"subs,omitempty"`
-	Probed int64   `json:"probed"` // the file's mtime when probed
+	Probed int64   `json:"probed"`         // the file's mtime when probed
 	FpsNum int     `json:"fpsn,omitempty"` // frame rate (FpsNum/FpsDen), 0 = unknown
 	FpsDen int     `json:"fpsd,omitempty"`
 	Ver    int     `json:"ver,omitempty"` // what the probe recorded (older entries are probed again)

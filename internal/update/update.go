@@ -113,6 +113,8 @@ func (u *Updater) Check() error {
 		Assets []asset `json:"assets"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&rel); err != nil {
+		// a proxy, captive portal or GitHub error page can answer 200 with HTML
+		err = fmt.Errorf("GitHub sent something that isn't release information (%v) -- try again later", err)
 		u.set(func(s *Status) { s.State, s.Error = "", err.Error() })
 		return err
 	}

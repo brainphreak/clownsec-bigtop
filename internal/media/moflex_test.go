@@ -20,7 +20,7 @@ func TestMoflexArgs(t *testing.T) {
 		}
 	}
 	a = strings.Join(MoflexArgs(j, "", 0), " ")
-	for _, want := range []string{"fps=24000/1001", "-r 24000/1001", "-mo_layout 6", "-qp 12 -mobi_qyx 2"} {
+	for _, want := range []string{"fps=24000/1001", "-r 24000/1001", "-mo_layout 6", "-qp 16 -mobi_qyx 0"} {
 		if !strings.Contains(a, want) {
 			t.Errorf("2D args miss %q:\n%s", want, a)
 		}

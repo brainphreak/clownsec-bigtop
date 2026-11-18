@@ -40,16 +40,18 @@ func (t *Tool) MoflexEncoder() string {
 	return ""
 }
 
-// MoflexQ is the default quantizer: about 1.0-1.5 Mbit/s for 3D, half that for 2D, and decodes
-// with room to spare on an Old 3DS.
-const MoflexQ = 24
+// MoflexQ is the base quantizer. By default the encoder picks a quantizer per frame from the
+// frame's brightness and detail (MOBI_AQ, fitted to the official encoder's own choices: the finest
+// step on dark frames, coarser on bright busy ones) -- about 1.5 Mbit/s of 3D video, which an Old
+// 3DS streams and decodes with room to spare. A q in the request means one fixed quantizer instead.
+const MoflexQ = 16
 
 // MoflexArgs: the encoder command line for a job. layout is the item's frame shape ("", "2d",
 // "hsbs", "fsbs"); q the MobiClip quantizer (12..59, 0 = MoflexQ).
 func MoflexArgs(j Job, layout string, q int) []string {
 	m := j.Media
 	if q < 12 || q > 59 {
-		q = MoflexQ
+		q = MoflexQ // with the per-frame quantizer (moflexEnv) this is only its starting point
 	}
 	num, den := m.FpsNum, m.FpsDen
 	if num <= 0 || den <= 0 {
@@ -65,10 +67,13 @@ func MoflexArgs(j Job, layout string, q int) []string {
 	pre = append(pre, fmt.Sprintf("fps=%d/%d", num, den))
 	// one eye: the source's shape (its pixel aspect applied, a half-width eye stretched back),
 	// fitted into 400x240, black bars, 4:2:0
+	// The picture's size and position are multiples of 8, so a letterbox or pillarbox edge falls on
+	// a transform block boundary: an edge inside a block rings into the black bar (the official
+	// encoder blanks to an 8-pixel boundary for the same reason).
 	eye := func(k int) string {
 		return fmt.Sprintf("scale=w=iw*sar*%d:h=ih:flags=lanczos,setsar=1,"+
-			"scale=400:240:force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos,"+
-			"pad=400:240:(ow-iw)/2:(oh-ih)/2:black,setsar=1,format=yuv420p", k)
+			"scale=400:240:force_original_aspect_ratio=decrease:force_divisible_by=8:flags=lanczos,"+
+			"pad=400:240:floor((ow-iw)/16)*8:floor((oh-ih)/16)*8:black,setsar=1,format=yuv420p", k)
 	}
 	stereo := layout == "hsbs" || layout == "fsbs"
 
@@ -123,10 +128,16 @@ func MoflexArgs(j Job, layout string, q int) []string {
 	return append(a, "-mo_live", "1", "-f", "moflex", "pipe:1")
 }
 
-// moflexEnv: the encoder's tuning (the 8x8 luma transform, motion search), set through its
-// environment.
+// moflexEnv: the encoder's tuning, set through its environment -- the 8x8 luma transform, 4x4 chroma
+// split in P frames, inter 4x4 deadzone, intra-in-P bias, motion search, and the per-frame
+// quantizer (brightness/detail model, dark frames at the finest step). Measured against the
+// official encoder on dark film: see the moflex-encoder notes.
 var moflexEnv = []string{"MOBI_8X8=1", "MOBI_8X8_MS=1", "MOBI_SUBME=9",
-	"MOBI_V11_MV_REFINE=1", "MOBI_V11_MV_PENALTY=0"}
+	"MOBI_V11_MV_REFINE=1", "MOBI_V11_MV_PENALTY=0", "MOBI_SKIP=0",
+	"MOBI_CSPLIT=1", "MOBI_DZ=3", "MOBI_INTER4_DZ=1", "MOBI_P_INTRA_BIAS=200"}
+
+// moflexAQ: the per-frame quantizer, unless the request fixed one (offset 4 = ~1.5 Mbit/s 3D)
+var moflexAQ = []string{"MOBI_AQ=1", "MOBI_AQ_OFFSET=4.0"}
 
 // TranscodeMoflex runs a live moflex job, writing to w until it ends or ctx is cancelled.
 func (t *Tool) TranscodeMoflex(ctx context.Context, j Job, layout string, q int, w io.Writer) error {
@@ -137,6 +148,9 @@ func (t *Tool) TranscodeMoflex(ctx context.Context, j Job, layout string, q int,
 	cmd := exec.CommandContext(ctx, enc, MoflexArgs(j, layout, q)...)
 	hideWindow(cmd)
 	cmd.Env = append(os.Environ(), moflexEnv...)
+	if q < 12 || q > 59 {
+		cmd.Env = append(cmd.Env, moflexAQ...)
+	}
 	cmd.Stdout = w
 	var stderr bytes.Buffer
 	cmd.Stderr = &limited{&stderr, 4096}

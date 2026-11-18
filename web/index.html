@@ -121,7 +121,10 @@ async function api(method, url, body, raw) {
   }
   const r = await fetch(url, opt);
   if (!r.ok) throw new Error((await r.text()) || ('HTTP ' + r.status));
-  return r.status === 204 ? null : r.json();
+  // an empty body (204, or the 202 that starts an update) is no answer, not broken JSON: parsing it
+  // was the "JSON" error shown on every update from this page
+  const t = await r.text();
+  return t ? JSON.parse(t) : null;
 }
 
 let state = null, curLib = null, libData = { items: [], shows: [] }, bust = Date.now();
@@ -272,57 +275,78 @@ function field(id, labelText, value, placeholder, type = 'text') {
   return `<label for="${id}">${labelText}</label><input id="${id}" type="${type}" value="${esc(value || '')}" placeholder="${esc(placeholder || '')}">`;
 }
 
-// Library add / edit, with a folder browser
+// Library add (a wizard: folders, then a name) and edit (one screen), with a folder browser.
+// The name is kept as it is typed, so redrawing the folder list never clears it.
 function libDialog(lib) {
   const folders = lib ? [...lib.folders] : [];
-  const draw = () => open(`
-    <h3>${lib ? 'Edit library' : 'Add a library'}</h3>
-    ${field('lname', 'Name (what the 3DS shows)', lib ? lib.name : '', 'Movies, 3D Movies, Cartoons…')}
-    <label>Folders</label>
-    <div id="flist">${folders.map((f, i) => `<div class="row" style="margin:4px 0"><span style="overflow-wrap:anywhere">${esc(f)}</span>
-       <button class="small" style="flex:none" data-rm="${i}">Remove</button></div>`).join('') || '<div class="hint">None yet.</div>'}</div>
-    <p><button id="browse">+ Add a folder…</button></p>
-    <div id="browser"></div>
-    <div class="err" id="lerr"></div>
-    <div class="actions">
-      ${lib ? '<button id="ldel" style="margin-right:auto">Remove library</button>' : ''}
-      <button id="lcancel">Cancel</button><button class="primary" id="lsave">${lib ? 'Save' : 'Add and scan'}</button>
-    </div>`);
+  let name = lib ? lib.name : '', step = lib ? 'edit' : 'folders', at = '';
+  const base = p => p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p;
+  const folderList = () => `<div id="flist">${folders.map((f, i) => `<div class="row" style="margin:4px 0"><span style="overflow-wrap:anywhere">${esc(f)}</span>
+       <button class="small" style="flex:none" data-rm="${i}">Remove</button></div>`).join('') || '<div class="hint">None yet — browse to a folder and press “Add this folder”.</div>'}</div>`;
+  const draw = () => {
+    if (step === 'name') open(`
+      <h3>Add a library — name it</h3>
+      ${field('lname', 'Name (what the 3DS shows)', name, 'Movies, 3D Movies, Cartoons…')}
+      <label>Folders</label>${folders.map(f => `<div class="hint" style="overflow-wrap:anywhere">${esc(f)}</div>`).join('')}
+      <div class="err" id="lerr"></div>
+      <div class="actions"><button id="lback" style="margin-right:auto">Back</button>
+        <button id="lcancel">Cancel</button><button class="primary" id="lsave">Add and scan</button></div>`);
+    else open(`
+      <h3>${lib ? 'Edit library' : 'Add a library — choose its folders'}</h3>
+      ${lib ? field('lname', 'Name (what the 3DS shows)', name, 'Movies, 3D Movies, Cartoons…') : ''}
+      <label>Folders</label>${folderList()}
+      <div id="browser"></div>
+      <div class="err" id="lerr"></div>
+      <div class="actions">
+        ${lib ? '<button id="ldel" style="margin-right:auto">Remove library</button>' : ''}
+        <button id="lcancel">Cancel</button>
+        <button class="primary" id="${lib ? 'lsave' : 'lnext'}">${lib ? 'Save' : 'Next'}</button>
+      </div>`);
+    hook();
+    if (step !== 'name') browse(at);
+  };
   const hook = () => {
-    $('#flist').querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { folders.splice(+b.dataset.rm, 1); keepName(); draw(); hook(); });
-    $('#browse').onclick = () => browse('');
+    const ln = $('#lname'); if (ln) ln.oninput = () => { name = ln.value; };
+    const fl = $('#flist');
+    if (fl) fl.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { folders.splice(+b.dataset.rm, 1); draw(); });
     $('#lcancel').onclick = close;
-    if (lib) $('#ldel').onclick = async () => {
+    if ($('#lnext')) $('#lnext').onclick = () => {
+      if (!folders.length && at) folders.push(at);   // pressed Next while looking at a folder: that one
+      if (!folders.length) { $('#lerr').textContent = 'Choose at least one folder first.'; return; }
+      if (!name) name = base(folders[folders.length - 1]);
+      step = 'name'; draw();
+    };
+    if ($('#lback')) $('#lback').onclick = () => { step = 'folders'; draw(); };
+    if (lib && $('#ldel')) $('#ldel').onclick = async () => {
       if (!confirm(`Remove "${lib.name}" from Big Top? The video files stay where they are.`)) return;
       await api('DELETE', `/admin/api/libraries/${lib.id}`); close(); curLib = null; refresh();
     };
-    $('#lsave').onclick = async () => {
+    if ($('#lsave')) $('#lsave').onclick = async () => {
       try {
-        const body = { name: $('#lname').value, folders };
+        const body = { name, folders };
         if (lib) await api('PUT', `/admin/api/libraries/${lib.id}`, body);
         else { const r = await api('POST', '/admin/api/libraries', body); curLib = r.id; }
         close(); refresh(); poll();
       } catch (e) { $('#lerr').textContent = e.message; }
     };
   };
-  let nameKeep = lib ? lib.name : '';
-  const keepName = () => { nameKeep = $('#lname').value; };
   const browse = async path => {
-    keepName();
     try {
       const d = await api('GET', '/admin/api/browse?path=' + encodeURIComponent(path));
+      at = d.path || '';
+      const added = folders.includes(d.path);
       $('#browser').innerHTML = `<div class="card">
         <div class="row"><b style="overflow-wrap:anywhere">${esc(d.path || 'Choose a drive or folder')}</b>
-          ${d.path ? `<button class="small primary" style="flex:none" id="pick">Use this folder${d.videos ? ` (${d.videos} videos here)` : ''}</button>` : ''}</div>
+          ${d.path ? `<button class="small ${added ? '' : 'primary'}" style="flex:none" id="pick" ${added ? 'disabled' : ''}>${added ? 'Added' : 'Add this folder'}${d.videos ? ` (${d.videos} videos here)` : ''}</button>` : ''}</div>
         <div class="picker">
           ${d.path ? `<div data-p="${esc(d.parent)}">⬆ Up</div>` : ''}
           ${d.dirs.map(x => `<div data-p="${esc(x.path)}">📁 ${esc(x.name)}</div>`).join('') || '<div>No folders inside.</div>'}
         </div></div>`;
       $('#browser').querySelectorAll('[data-p]').forEach(el => el.onclick = () => browse(el.dataset.p));
-      if (d.path) $('#pick').onclick = () => { if (!folders.includes(d.path)) folders.push(d.path); draw(); $('#lname').value = nameKeep; hook(); };
+      if (d.path && !added) $('#pick').onclick = () => { folders.push(d.path); draw(); };
     } catch (e) { $('#lerr').textContent = e.message; }
   };
-  draw(); hook();
+  draw();
 }
 
 // moflex holds its own stereo layout: 2D or 3D. Other formats must say how the frame splits.

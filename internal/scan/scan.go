@@ -121,7 +121,16 @@ func walk(folders []string) []found {
 			if strings.HasPrefix(name, "._") || !Extensions[strings.ToLower(filepath.Ext(name))] {
 				return nil
 			}
-			if fi, err := d.Info(); err == nil && fi.Size() > 0 {
+			fi, err := d.Info()
+			if err == nil && d.Type()&fs.ModeSymlink != 0 {
+				// a link to a video: the file it points to (its own size is just the path's length,
+				// and the 3DS reads exactly as many bytes as the size says)
+				fi, err = os.Stat(p)
+				if err == nil && !fi.Mode().IsRegular() {
+					return nil
+				}
+			}
+			if err == nil && fi.Size() > 0 {
 				out = append(out, found{p, fi.Size(), fi.ModTime().Unix()})
 			}
 			return nil
@@ -201,8 +210,14 @@ func (sc *Scanner) scanLib(lib *library.Library, refresh bool) {
 			it.Lib, it.Path, it.Size, it.MTime, it.Fingerprint = lib.ID, f.path, f.size, f.mtime, fp
 			sc.Store.Unlock()
 			sc.identify(it)
-		} else if refresh {
+		} else if refresh || (library.IsMoflex(it.Path) && !it.Checked3D) {
+			// a moflex from before Big Top read 3D from the file itself: once, for its 3D label
 			sc.identify(it)
+		}
+		if library.IsMoflex(it.Path) && !it.Checked3D {
+			sc.Store.Lock()
+			it.Checked3D = true
+			sc.Store.Unlock()
 		}
 		sc.Store.Lock()
 		it.Missing = 0
@@ -280,9 +295,13 @@ func (sc *Scanner) identify(it *library.Item) {
 	// a super moflex says what it is itself
 	var sup *moflex.Super
 	showDesc := ""
+	contentIs3D := "" // a plain moflex: 2D or 3D from its own frames (the player's rule)
 	if library.IsMoflex(it.Path) {
 		if f, err := os.Open(it.Path); err == nil {
 			sup, _ = moflex.ReadSuper(f, it.Size)
+			if st, ok := moflex.DetectStereo(f, it.Size); ok {
+				contentIs3D = map[bool]string{true: "3d", false: "2d"}[st]
+			}
 			f.Close()
 		}
 	}
@@ -332,6 +351,11 @@ func (sc *Scanner) identify(it *library.Item) {
 		case "0":
 			det.Is3D = "2d"
 		}
+	}
+
+	// the file's own frames beat its name; only its super moflex info says more
+	if contentIs3D != "" && (sup == nil || sup.Field("is3d") == "") {
+		det.Is3D = contentIs3D
 	}
 
 	// not moflex: its streams (length, audio and subtitle tracks), for transcoding
