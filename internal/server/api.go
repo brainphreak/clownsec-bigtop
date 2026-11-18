@@ -78,6 +78,7 @@ type Entry struct {
 	Watched  bool   `json:"watched,omitempty"`
 	Size     int64  `json:"size,omitempty"`
 	Super    bool   `json:"super,omitempty"`
+	Format   string `json:"fmt,omitempty"`      // the file's container: "MOFLEX", "MP4", "MKV", ...
 	Episodes int    `json:"episodes,omitempty"` // shows/seasons: how many
 	Seen     int    `json:"seen,omitempty"`     // ...and how many watched
 	Audio    string `json:"audio,omitempty"`
@@ -130,6 +131,7 @@ func (s *Server) itemEntry(it *library.Item, client string, full bool) Entry {
 	if e.Title == "" {
 		e.Title = strings.TrimSuffix(filepath.Base(it.Path), filepath.Ext(it.Path))
 	}
+	e.Format = strings.ToUpper(strings.TrimPrefix(filepath.Ext(it.Path), "."))
 	e.Summary = in.Summary
 	if !full {
 		e.Summary = clip(e.Summary, 400)
