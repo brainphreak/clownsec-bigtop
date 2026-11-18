@@ -412,11 +412,15 @@ is ever unreadable, it's set aside (renamed `.broken-<date>`) rather than overwr
 
 ## Building from source
 
-Needs [Go](https://go.dev) 1.22 or newer. No other dependencies.
+Needs [Go](https://go.dev) 1.22 or newer, and the four moflex encoder builds (see *The moflex encoder*
+below) in `~/moflex-encoder/dist/encoders/` (or the folder `MOFLEX_ENCODERS` names).
 
 ```sh
 ./build.sh
 ```
+
+`go run .` and `go build .` without `-tags moflexenc` make a Big Top with no encoder built in; it then
+uses an encoder placed in its data folder (`moflex/moflex-ffmpeg`) or set by `$BIGTOP_MOFLEX_ENCODER`.
 
 builds Windows, macOS (Apple silicon and Intel) and Linux binaries into `dist/`, the version in each
 file name, plus a zip of the Windows build, a Linux AppImage (needs `mksquashfs` — on macOS
@@ -456,6 +460,23 @@ The HTTP interface is described in [docs/API.md](docs/API.md).
 
 ---
 
+## The moflex encoder
+
+An Old 3DS can't decode the H.264 that MP4 and MKV files hold, so Big Top turns them into moflex as
+they play. The encoder that does it is **[Mobipeg-MOFLEX](https://github.com/Oldhimaster1/Mobipeg-MOFLEX)
+by Movie Bot** — FFmpeg and x264 with a MobiClip encoder and moflex muxer — with Clownsec's
+improvements on top: an exact 8×8 luma transform, 4×4 chroma blocks where an edge needs them, a
+quantizer per frame that follows the official encoder's choices (finest on dark scenes), and fixes
+measured against Nintendo's encoder on 3DS hardware. The patch, its notes and the build script are in
+[clownsec-moflex-encoder](https://github.com/brainphreak/clownsec-moflex-encoder/tree/main/patches).
+
+Each Big Top download carries the encoder for its system and writes it into the data folder the
+first time it's needed. FFmpeg, x264 and so the encoder are licensed under the **GPL**; their source
+is at the links above.
+
+---
+
 ## License
 
-LGPL-2.1-or-later, like the player. See [LICENSE](LICENSE).
+Big Top: LGPL-2.1-or-later, like the player. See [LICENSE](LICENSE). The built-in moflex encoder is
+a separate program under the GPL (see *The moflex encoder*).

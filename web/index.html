@@ -462,6 +462,11 @@ function settingsDialog() {
     <p class="hint">Version ${esc(state.version)} · <a href="#" id="updcheck" style="color:var(--accent2)">check for updates</a>
       <span id="updres"></span></p>
     <p class="hint">FFmpeg (MP4/MKV/AVI): ${state.ffmpeg && state.ffmpeg.found ? esc(state.ffmpeg.version || 'found') + ' · ' + esc(state.ffmpeg.ffmpeg) : 'not found'}</p>
+    <p class="hint">Old 3DS MP4/MKV streaming uses the built-in moflex encoder:
+      <a href="https://github.com/Oldhimaster1/Mobipeg-MOFLEX" target="_blank" rel="noopener" style="color:var(--accent2)">Mobipeg-MOFLEX</a>
+      by Movie Bot, with
+      <a href="https://github.com/brainphreak/clownsec-moflex-encoder/tree/main/patches" target="_blank" rel="noopener" style="color:var(--accent2)">Clownsec's improvements</a>
+      (FFmpeg + x264, GPL).</p>
     <p class="hint">Clownsec catalog: ${state.catalog.movies} movies, ${state.catalog.shows} shows ·
       <a href="#" id="refresh" style="color:var(--accent2)">re-read every file's info</a></p>
     <div class="err" id="xerr"></div>

@@ -3,13 +3,17 @@ package media
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -22,13 +26,16 @@ import (
 const MoflexEncoderName = "moflex-ffmpeg"
 
 // MoflexEncoder returns the live moflex encoder, "" when there isn't one: $BIGTOP_MOFLEX_ENCODER,
-// Big Top's own copy, or one next to Big Top.
+// else the one built into Big Top (written once into the data folder, again only when a newer Big
+// Top carries a different one), else one installed in the data folder or next to Big Top.
 func (t *Tool) MoflexEncoder() string {
-	var c []string
-	if e := os.Getenv("BIGTOP_MOFLEX_ENCODER"); e != "" {
-		c = append(c, e)
+	if e := os.Getenv("BIGTOP_MOFLEX_ENCODER"); e != "" && isFile(e) {
+		return e
 	}
-	c = append(c, filepath.Join(t.dataDir, "moflex", exe(MoflexEncoderName)))
+	if p := t.extractEncoder(); p != "" {
+		return p
+	}
+	c := []string{filepath.Join(t.dataDir, "moflex", exe(MoflexEncoderName))}
 	if self, err := os.Executable(); err == nil {
 		c = append(c, filepath.Join(filepath.Dir(self), exe(MoflexEncoderName)))
 	}
@@ -38,6 +45,50 @@ func (t *Tool) MoflexEncoder() string {
 		}
 	}
 	return ""
+}
+
+var (
+	encMu    sync.Mutex
+	encReady string // the extracted encoder, once checked (hashing 20+ MB per request would be waste)
+)
+
+// extractEncoder writes the built-in encoder into the data folder if it isn't there already (a
+// .sha256 beside it says which build it is). "" when there is none built in or it can't be written.
+func (t *Tool) extractEncoder() string {
+	if len(embeddedEncoder) == 0 {
+		return ""
+	}
+	encMu.Lock()
+	defer encMu.Unlock()
+	if encReady != "" && isFile(encReady) {
+		return encReady
+	}
+	dir := filepath.Join(t.dataDir, "moflex")
+	p := filepath.Join(dir, exe(MoflexEncoderName))
+	sum := sha256.Sum256(embeddedEncoder)
+	want := hex.EncodeToString(sum[:])
+	if b, err := os.ReadFile(p + ".sha256"); err == nil && strings.TrimSpace(string(b)) == want && isFile(p) {
+		encReady = p
+		return p
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		log.Printf("moflex encoder: %v", err)
+		return ""
+	}
+	tmp := p + ".new"
+	if err := os.WriteFile(tmp, embeddedEncoder, 0o755); err != nil {
+		log.Printf("moflex encoder: %v", err)
+		return ""
+	}
+	os.Remove(p) // Windows can't rename over an existing file
+	if err := os.Rename(tmp, p); err != nil {
+		log.Printf("moflex encoder: %v", err)
+		return ""
+	}
+	os.WriteFile(p+".sha256", []byte(want+"\n"), 0o644)
+	log.Printf("moflex encoder ready: %s", p)
+	encReady = p
+	return p
 }
 
 // MoflexQ is the base quantizer. By default the encoder picks a quantizer per frame from the
