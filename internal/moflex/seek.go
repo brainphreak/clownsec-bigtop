@@ -20,39 +20,48 @@ type Start struct {
 const maxTs = 100 * 3600 * 1000000 // a sync time beyond 100 hours is a false marker inside data
 
 // syncAt finds the first real sync block at or after off (within 4 MB): its offset and time.
+// It reads a little at a time -- sync blocks come about once a second, and on a network share
+// every megabyte read is time the player waits.
 func syncAt(r io.ReaderAt, size, off int64) (int64, int64, bool) {
-	buf := make([]byte, 4<<20)
-	n, _ := r.ReadAt(buf, off)
-	b := buf[:n]
-	for i := 0; i+14 <= len(b); i++ {
-		if b[i] != 0x4C || b[i+1] != 0x32 {
-			continue
+	const chunk = 128 << 10
+	buf := make([]byte, chunk+14)
+	for done := int64(0); done < 4<<20; done += chunk {
+		n, _ := r.ReadAt(buf, off+done)
+		b := buf[:n]
+		for i := 0; i+14 <= len(b) && i < chunk; i++ {
+			if b[i] != 0x4C || b[i+1] != 0x32 {
+				continue
+			}
+			ts := int64(binary.BigEndian.Uint64(b[i+4:]))
+			if ts >= 0 && ts < maxTs {
+				return off + done + int64(i), ts, true
+			}
 		}
-		ts := int64(binary.BigEndian.Uint64(b[i+4:]))
-		if ts >= 0 && ts < maxTs {
-			return off + int64(i), ts, true
+		if n < len(buf) {
+			break // the end of the file
 		}
 	}
 	return 0, 0, false
 }
 
-// Duration is the time of the last sync block (0 when none is found near the end).
+// Duration is the time of the last sync block (0 when none is found near the end). It reads the
+// end of the file once (a larger piece only if that holds no sync block).
 func Duration(r io.ReaderAt, size int64) int64 {
 	for back := int64(1 << 20); back <= 16<<20; back *= 4 {
 		from := size - back
 		if from < 0 {
 			from = 0
 		}
-		var last int64 = -1
-		for off := from; ; {
-			o, ts, ok := syncAt(r, size, off)
-			if !ok || o >= size {
-				break
+		buf := make([]byte, size-from)
+		n, _ := r.ReadAt(buf, from)
+		b := buf[:n]
+		last := int64(-1)
+		for i := 0; i+14 <= len(b); i++ {
+			if b[i] == 0x4C && b[i+1] == 0x32 {
+				if ts := int64(binary.BigEndian.Uint64(b[i+4:])); ts >= 0 && ts < maxTs && ts > last {
+					last = ts
+				}
 			}
-			if ts > last {
-				last = ts
-			}
-			off = o + 2
 		}
 		if last >= 0 {
 			return last
@@ -120,8 +129,11 @@ func KeyStart(r io.ReaderAt, size, t int64) (Start, error) {
 // walkStarts parses blocks from the sync block at off up to time t and returns the last sync block
 // where nothing was half-read and the next video packet is a keyframe.
 func walkStarts(r io.ReaderAt, size, off, t int64) (Start, bool) {
-	const win = 24 << 20
-	n := int64(win)
+	// read only as far as t: up to the first sync block after it (plus a margin)
+	n := int64(24 << 20)
+	if end, _ := near(r, size, t+1_500_000); end > off {
+		n = end - off + 1<<20
+	}
 	if off+n > size {
 		n = size - off
 	}
