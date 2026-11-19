@@ -27,6 +27,7 @@ type demux struct {
 	tbNum    int
 	tbDen    int
 	acc      map[int]int
+	naudio   int // audio streams declared (counted once each, as they first appear)
 	brLast   uint32
 	brPos    int
 }
@@ -125,6 +126,9 @@ func (d *demux) sync() bool {
 			return true
 		case 2: // audio
 			idx = d.r8()
+			if idx == d.nstreams {
+				d.naudio++
+			}
 			d.p += 1 + 3 + 1
 		case 1, 3: // video
 			idx = d.r8()

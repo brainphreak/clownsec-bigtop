@@ -38,6 +38,7 @@ type WebJob struct {
 	GapMs    int64
 	Stereo   bool // pairs of eye frames, interleaved: one side-by-side picture per pair
 	Num, Den int  // pictures per second = Num/Den
+	InAudio  int  // which audio stream inside the blocks (0 = the first)
 
 	// anything else: what ffprobe found and the audio track (stream index, -1 = default)
 	Media *library.Media
@@ -107,7 +108,7 @@ func WebArgs(j WebJob, dir string) []string {
 		// FFmpeg times moflex video by counting frames at the declared rate, so the pictures are
 		// re-timed here; 3D: the even frames are the left eye, the odd ones the right
 		a = append(a, "-f", "moflex", "-i", "pipe:0")
-		amap := "0:a:0?"
+		amap := fmt.Sprintf("0:a:%d?", j.InAudio)
 		if j.AltAudio != "" {
 			a = append(a, "-f", "s16le", "-ar", fmt.Sprint(j.AltRate), "-ac", fmt.Sprint(j.AltChans), "-i", j.AltAudio)
 			amap = "1:a:0"

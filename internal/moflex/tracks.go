@@ -50,6 +50,23 @@ func Sections(r io.ReaderAt, size int64) ([]Section, error) {
 	return out, nil
 }
 
+// BlocksEnd is where a moflex's blocks end: the start of its super moflex trailer, or the file's
+// size. Everything that reads the video (length, seeking) must stop there -- a trailer can hold
+// hundreds of MB of extra audio, whose bytes could pass for sync blocks.
+func BlocksEnd(r io.ReaderAt, size int64) int64 {
+	if size < 16 {
+		return size
+	}
+	tail := make([]byte, 16)
+	if _, err := r.ReadAt(tail, size-16); err != nil || string(tail[8:]) != trailerMagic {
+		return size
+	}
+	if off := int64(binary.LittleEndian.Uint64(tail[:8])); off > 0 && off < size {
+		return off
+	}
+	return size
+}
+
 // pick returns the k-th section with one of the tags.
 func pick(secs []Section, k int, tags ...string) (Section, bool) {
 	for _, s := range secs {

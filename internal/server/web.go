@@ -262,43 +262,58 @@ func (s *Server) apiWeb(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		st, _ := f.Stat()
-		ws.fileSize, ws.size = st.Size(), st.Size()
-		// a super moflex: its extra audio tracks and video versions
-		if sup, err := moflex.ReadSuper(f, st.Size()); err == nil {
-			nm := func(l, def string) string {
-				if n := langName(l); n != "" {
-					return n
-				}
-				if l != "" {
-					return l
-				}
-				return def
+		ws.fileSize, ws.size = st.Size(), moflex.BlocksEnd(f, st.Size()) // not into the trailer
+		// the audio: the streams inside the blocks (usually one), then a super moflex's extra
+		// tracks; and its video versions
+		mainInfo := moflex.Probe(io.NewSectionReader(f, 0, ws.size), ws.size)
+		nm := func(l, def string) string {
+			if n := langName(l); n != "" {
+				return n
 			}
-			if len(sup.AltAudios) > 0 {
-				out.Audio = append(out.Audio, TrackOut{N: 0, Name: nm(sup.AudioLang, "Audio 1"), Default: true})
-				for i, l := range sup.AltAudios {
-					out.Audio = append(out.Audio, TrackOut{N: i + 1, Name: nm(l, fmt.Sprintf("Audio %d", i+2))})
+			if l != "" {
+				return l
+			}
+			return def
+		}
+		sup, _ := moflex.ReadSuper(f, st.Size())
+		var lang0 string
+		var alts []string
+		if sup != nil {
+			lang0, alts = sup.AudioLang, sup.AltAudios
+		}
+		nIn := max(mainInfo.Audios, 1)
+		if nIn+len(alts) > 1 {
+			for i := 0; i < nIn; i++ {
+				name := fmt.Sprintf("Audio %d", i+1)
+				if i == 0 {
+					name = nm(lang0, name)
 				}
-				if n, err := strconv.Atoi(q.Get("audio")); err == nil && n > 0 && n <= len(sup.AltAudios) {
-					if a, err := moflex.Audio(f, st.Size(), n-1); err == nil {
-						ws.alt, j.AltRate, j.AltChans, out.AudioN = n-1, a.Rate, a.Channels, n
-					}
+				out.Audio = append(out.Audio, TrackOut{N: i, Name: name, Default: i == 0})
+			}
+			for i, l := range alts {
+				out.Audio = append(out.Audio, TrackOut{N: nIn + i, Name: nm(l, fmt.Sprintf("Audio %d", nIn+i+1))})
+			}
+			if n, err := strconv.Atoi(q.Get("audio")); err == nil && n > 0 && n < nIn+len(alts) {
+				if n < nIn {
+					j.InAudio, out.AudioN = n, n
+				} else if a, err := moflex.Audio(f, st.Size(), n-nIn); err == nil {
+					ws.alt, j.AltRate, j.AltChans, out.AudioN = n-nIn, a.Rate, a.Channels, n
 				}
 			}
-			if len(sup.Versions) > 0 {
-				main := sup.MainLabel
-				if main == "" {
-					main = "Main"
-				}
-				out.Versions = append(out.Versions, webSub{0, main})
-				for i, l := range sup.Versions {
-					out.Versions = append(out.Versions, webSub{i + 1, l})
-				}
-				if n, err := strconv.Atoi(q.Get("version")); err == nil && n > 0 && n <= len(sup.Versions) {
-					if v, err := moflex.Version(f, st.Size(), n-1); err == nil {
-						off, size := versionRange(v)
-						ws.base, ws.size, out.VersionN = off, size, n
-					}
+		}
+		if sup != nil && len(sup.Versions) > 0 {
+			main := sup.MainLabel
+			if main == "" {
+				main = "Main"
+			}
+			out.Versions = append(out.Versions, webSub{0, main})
+			for i, l := range sup.Versions {
+				out.Versions = append(out.Versions, webSub{i + 1, l})
+			}
+			if n, err := strconv.Atoi(q.Get("version")); err == nil && n > 0 && n <= len(sup.Versions) {
+				if v, err := moflex.Version(f, st.Size(), n-1); err == nil {
+					off, size := versionRange(v)
+					ws.base, ws.size, out.VersionN = off, size, n
 				}
 			}
 		}

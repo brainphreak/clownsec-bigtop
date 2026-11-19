@@ -220,6 +220,7 @@ type Info struct {
 	TbNum  int // the video time base (frame period) as declared
 	TbDen  int
 	TbEye  bool // a 3D file declaring the eye rate (Nintendo's): a pair lasts two periods
+	Audios int  // audio streams inside the blocks (1 usually; an older way to add a language made 2)
 }
 
 // Probe reads a moflex's length, 3D-ness and frame rate.
@@ -234,7 +235,7 @@ func Probe(r io.ReaderAt, size int64) Info {
 	d := &demux{b: buf[:got], vstream: -1}
 	st, ok := d.stereo()
 	in.Stereo = ok && st
-	in.TbNum, in.TbDen = d.tbNum, d.tbDen
+	in.TbNum, in.TbDen, in.Audios = d.tbNum, d.tbDen, d.naudio
 	if in.Stereo && d.tbNum > 0 && float64(d.tbDen)/float64(d.tbNum) >= 47 {
 		in.TbEye = true
 	}
