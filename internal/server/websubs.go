@@ -142,8 +142,10 @@ func (s *Server) apiWebSub(w http.ResponseWriter, r *http.Request) {
 	}
 	if asVTT {
 		eyes, _ := strconv.Atoi(r.URL.Query().Get("eyes"))
+		depth, _ := strconv.ParseFloat(r.URL.Query().Get("depth"), 64)
+		depth = max(-10, min(10, depth))
 		w.Header().Set("Content-Type", "text/vtt; charset=utf-8")
-		io.WriteString(w, vtt(cues, eyes))
+		io.WriteString(w, vtt(cues, eyes, depth))
 		return
 	}
 	out := make([][3]any, len(cues))
@@ -266,7 +268,7 @@ func assTime(s string) int64 {
 // vtt writes cues as WebVTT. eyes=2 (a side-by-side picture): every line twice, one in the middle
 // of each half -- one per eye, in a phone's own full-screen player, which shows text tracks but
 // nothing else drawn over the video.
-func vtt(cues []cue, eyes int) string {
+func vtt(cues []cue, eyes int, depth float64) string {
 	var b strings.Builder
 	b.WriteString("WEBVTT\n\n")
 	t := func(v int64) string {
@@ -276,8 +278,10 @@ func vtt(cues []cue, eyes int) string {
 	for _, c := range cues {
 		text := esc.Replace(c.Text)
 		if eyes == 2 {
-			fmt.Fprintf(&b, "%s --> %s position:25%% align:center size:46%%\n%s\n\n", t(c.Start), t(c.End), text)
-			fmt.Fprintf(&b, "%s --> %s position:75%% align:center size:46%%\n%s\n\n", t(c.Start), t(c.End), text)
+			// depth (-10..10): the copies shifted apart, as the page does -- 0.15% of an eye per step
+			d := depth * 0.15 * 0.5
+			fmt.Fprintf(&b, "%s --> %s position:%.1f%% align:center size:46%%\n%s\n\n", t(c.Start), t(c.End), 25+d, text)
+			fmt.Fprintf(&b, "%s --> %s position:%.1f%% align:center size:46%%\n%s\n\n", t(c.Start), t(c.End), 75-d, text)
 		} else {
 			fmt.Fprintf(&b, "%s --> %s\n%s\n\n", t(c.Start), t(c.End), text)
 		}

@@ -1172,7 +1172,7 @@ async function loadSubs() {
   if (P.sess.baked) {
     const tr = document.createElement('track');
     tr.kind = 'subtitles'; tr.default = true; tr.label = P.sess.subs[+n].name;
-    tr.src = `/api/items/${id}/websubs/${n}.vtt?eyes=${['fsbs', 'hsbs'].includes(P.sess.baked) ? 2 : 1}`;
+    tr.src = `/api/items/${id}/websubs/${n}.vtt?eyes=${['fsbs', 'hsbs'].includes(P.sess.baked) ? 2 : 1}&depth=${subDepth()}`;
     pv.appendChild(tr);
     tr.addEventListener('load', () => { tr.track.mode = 'showing'; });
     tr.track.mode = 'showing';
@@ -1205,23 +1205,47 @@ function drawSubs(force) {
   const view = pc.hidden ? '2d' : viewMode();
   const two = view === 'fsbs' || view === 'hsbs';
   const fs = Math.max(12, Math.min(46, r.height * (two && view === 'fsbs' ? 0.06 : 0.055)));
-  // above the controls while they show
-  const ui = !$('#player').classList.contains('idle') ? $('.pbot').offsetHeight : 0;
-  const lift = Math.max(r.height * 0.06, ui - (st.top + st.height - (r.top + r.height)));
-  const geo = [text, view, r.left, r.top, r.width, r.height, lift].join('|');
+  // one fixed place, always clear of the controls (they come and go; the subtitles don't move)
+  const lift = Math.max(r.height * 0.06, $('.pbot').offsetHeight - (st.top + st.height - (r.top + r.height)));
+  const geo = [text, view, r.left, r.top, r.width, r.height, lift, subDepth()].join('|');
   if (geo === subGeo && !force) return;
   subGeo = geo;
   const x0 = r.left - st.left, y0 = r.top - st.top, eyeW = two ? r.width / 2 : r.width;
-  const one = i => `<div class="eye" style="left:${x0 + i * eyeW}px;top:${y0}px;width:${eyeW}px;height:${r.height}px;padding-bottom:${lift}px">
-    <div class="ln ${view === 'hsbs' ? 'sq' : ''}" style="font-size:${fs}px;${view === 'hsbs' ? 'width:200%;flex:none' : ''}">${esc(text)}</div></div>`;
-  box.innerHTML = two ? one(0) + one(1) : one(0);
+  // depth: the eyes' copies shifted apart, left eye's to the right (in front of the screen)
+  const d = view === '2d' ? 0 : subDepth() * 0.0015 * eyeW; // 10 = 1.5% of an eye: plenty
+  const ln = (cls, style) => `<div class="ln ${cls} ${view === 'hsbs' ? 'sq' : ''}" style="font-size:${fs}px;${view === 'hsbs' ? 'width:200%;flex:none;' : ''}${style}">${esc(text)}</div>`;
+  const eye = (left, inner) => `<div class="eye" style="left:${left}px;top:${y0}px;width:${eyeW}px;height:${r.height}px;padding-bottom:${lift}px">${inner}</div>`;
+  if (two) {
+    const dx = view === 'hsbs' ? d / 2 : d; // half SBS: the picture is squeezed, so is the shift
+    box.innerHTML = eye(x0, ln('', `transform:translateX(${dx}px)${view === 'hsbs' ? ' scaleX(.5)' : ''}`)) +
+      eye(x0 + eyeW, ln('', `transform:translateX(${-dx}px)${view === 'hsbs' ? ' scaleX(.5)' : ''}`));
+  } else if (view === 'anaglyph' && d) {
+    // the left eye sees red, the right cyan: a red copy and a cyan copy, apart by the depth
+    // (white where they overlap), on their black outlines
+    box.innerHTML = eye(x0, ln('', `position:absolute;left:0;right:0;bottom:${lift}px;color:#000;transform:translateX(${d / 2}px)`) +
+      ln('', `position:absolute;left:0;right:0;bottom:${lift}px;color:#000;transform:translateX(${-d / 2}px)`) +
+      ln('red', `position:absolute;left:0;right:0;bottom:${lift}px;text-shadow:none;color:#f00;mix-blend-mode:screen;transform:translateX(${d / 2}px)`) +
+      ln('cyan', `position:absolute;left:0;right:0;bottom:${lift}px;text-shadow:none;color:#0ff;mix-blend-mode:screen;transform:translateX(${-d / 2}px)`));
+  } else {
+    box.innerHTML = eye(x0, ln('', ''));
+  }
 }
+// subtitle depth: -10 (behind the screen) .. 10 (well in front); one setting for every video
+const subDepth = () => Math.max(-10, Math.min(10, +lsGet('bt.subdepth', 3) || 0));
 (function subLoop() { requestAnimationFrame(subLoop); if (!$('#player').hidden) drawSubs(false); })();
 function menuCC() {
   const m = $('#pmenu'), cur = lsGet('bt.sub.' + P.id, ''), subs = (P.sess && P.sess.subs) || [];
-  m.innerHTML = '<h5>Subtitles</h5>' + `<button data-cc="" class="${cur === '' ? 'on' : ''}">Off</button>` +
+  m.innerHTML = (srcLayout() !== '2d' ? `<h5>Subtitle depth</h5><div style="display:flex;gap:8px;align-items:center;padding:4px 8px;font-size:13px">
+      <span>Back</span><input type="range" id="pdepth" min="-10" max="10" step="1" value="${subDepth()}" style="flex:1;accent-color:var(--accent);padding:0;border:0;background:none">
+      <span>Front</span></div>` : '') +
+    '<h5>Subtitles</h5>' + `<button data-cc="" class="${cur === '' ? 'on' : ''}">Off</button>` +
     subs.map(t => `<button data-cc="${t.n}" class="${cur === String(t.n) ? 'on' : ''}">${esc(t.name)}</button>`).join('');
   m.hidden = false;
+  const dp = $('#pdepth');
+  if (dp) {
+    dp.oninput = () => { lsSet('bt.subdepth', dp.value); drawSubs(true); };
+    dp.onchange = () => { if (P.sess && P.sess.baked) loadSubs(); }; // the phone's track carries the depth
+  }
   m.querySelectorAll('[data-cc]').forEach(b => b.onclick = () => {
     lsSet('bt.sub.' + P.id, b.dataset.cc || null); $('#pcc').classList.toggle('on', !!b.dataset.cc); m.hidden = true; loadSubs();
   });

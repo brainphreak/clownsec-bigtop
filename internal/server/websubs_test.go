@@ -18,8 +18,11 @@ func TestParseSubs(t *testing.T) {
 	if len(c) != 2 || c[0].Start != 2000 || c[0].End != 6500 || c[0].Text != "One\ntwo" || c[1].Text != "Later, with a comma" {
 		t.Fatalf("ass: %+v", c)
 	}
-	v := vtt(c, 2)
-	if strings.Count(v, "position:25%") != 2 || strings.Count(v, "position:75%") != 2 || !strings.HasPrefix(v, "WEBVTT") {
+	v := vtt(c, 2, 0)
+	if strings.Count(v, "position:25.0%") != 2 || strings.Count(v, "position:75.0%") != 2 || !strings.HasPrefix(v, "WEBVTT") {
 		t.Fatalf("vtt: %s", v)
+	}
+	if v := vtt(c, 2, 5); !strings.Contains(v, "position:25.4%") || !strings.Contains(v, "position:74.6%") {
+		t.Fatalf("vtt depth: %s", v)
 	}
 }
