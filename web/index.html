@@ -2,7 +2,12 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- "Add to Home Screen" opens Big Top without the browser's bars (an iPhone's only full screen for 3D) -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Big Top">
 <title>Clownsec Big Top</title>
 <style>
 :root {
@@ -97,6 +102,11 @@ body.viewer .admin { display: none !important; }   /* an inline display:flex wou
 .tile .art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; }
 .tile .prog { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: #0008; }
 .tile .prog div { height: 100%; background: var(--accent); }
+.seen { position: absolute; right: 6px; bottom: 8px; width: 22px; height: 22px; border-radius: 50%; background: var(--ok); color: #062; font-size: 14px; font-weight: 900; display: grid; place-items: center; box-shadow: 0 1px 4px #0008; }
+.tile.watched .art img { opacity: .55; }
+.ep .ck { width: 18px; flex: none; color: var(--ok); font-weight: 900; text-align: center; }
+.ep .bar2 { width: 40px; height: 4px; background: var(--panel2); border-radius: 3px; overflow: hidden; flex: none; }
+.ep .bar2 div { height: 100%; background: var(--accent); }
 .detail { display: grid; grid-template-columns: 200px 1fr; gap: 20px; margin-top: 4px; }
 .detail .art { aspect-ratio: 175 / 250; border-radius: 8px; background: var(--panel2); border: 1px solid var(--line); overflow: hidden; }
 .detail .art img { width: 100%; height: 100%; object-fit: fill; display: block; }
@@ -187,6 +197,7 @@ body.viewer .admin { display: none !important; }   /* an inline display:flex wou
       <span class="lbl" style="margin-left:8px">Show</span>
       <span id="f3d"></span>
       <button class="chip" id="fsup" title="Only super moflex files">Super only</button>
+      <button class="chip" id="funw" title="Hide what you've watched (in this browser)">Unwatched</button>
       <span class="grow"></span>
       <span class="count" id="fcount"></span>
       <button class="chip" id="fclear" hidden>Clear filters</button>
@@ -345,13 +356,13 @@ function renderLibs() {
 
 async function loadLib() {
   if (!curLib) { $('#grid').innerHTML = ''; return; }
-  libData = await api('GET', `/admin/api/libraries/${curLib}/items`);
+  libData = await api('GET', `/admin/api/libraries/${curLib}/items?client=${encodeURIComponent(webClient)}`);
   renderGrid();
 }
 
 // ---------- browsing ----------
 // The filters, kept between visits (per viewer, in this browser).
-const F = Object.assign({ kind: 'all', d3: 'all', sup: false, sort: 'added', genre: 'all', letter: 'all' },
+const F = Object.assign({ kind: 'all', d3: 'all', sup: false, unw: false, sort: 'added', genre: 'all', letter: 'all' },
   (() => { try { return JSON.parse(localStorage.getItem('bt.browse') || '{}'); } catch { return {}; } })());
 const saveF = () => { try { localStorage.setItem('bt.browse', JSON.stringify(F)); } catch {} };
 const KIND = { all: 'All', movie: 'Movies', tvshow: 'TV shows', musicvideo: 'Music videos', short: 'Shorts' };
@@ -364,6 +375,13 @@ const genresOf = g => (g || '').split(',').map(x => x.trim()).filter(Boolean);
 const fmtMin = m => m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`;
 const is3d = v => ['3d', 'hsbs', 'fsbs'].includes(v);
 
+// how far this browser got: 0..1 (0 = not started, or finished)
+function progOf(it) {
+  if (it.watched || !it.pos) return 0;
+  const d = it.dur || (it.info.runtime || 0) * 60000;
+  return d ? Math.min(1, it.pos / d) : 0.02;
+}
+
 // every title of the library once: movies/shorts/music videos, and shows (their episodes inside)
 function titles() {
   const out = [];
@@ -371,7 +389,8 @@ function titles() {
     if (it.missing || it.showId) continue;
     out.push({ kind: it.kind || 'movie', id: it.id, title: it.info.title || 'Untitled', year: it.info.year || 0,
       genres: genresOf(it.info.genres), added: it.added || 0, runtime: it.info.runtime || Math.round((it.dur || 0) / 60000),
-      is3d: is3d(it.info.is3d), sup: it.super, src: it.source, poster: it.poster, sum: it.info.summary || '' });
+      is3d: is3d(it.info.is3d), sup: it.super, src: it.source, poster: it.poster, sum: it.info.summary || '',
+      watched: !!it.watched, prog: progOf(it) });
   }
   for (const sh of libData.shows) {
     const eps = libData.items.filter(i => i.showId === sh.id && !i.missing);
@@ -379,7 +398,8 @@ function titles() {
     out.push({ kind: 'tvshow', id: sh.id, title: sh.info.title || 'Untitled', year: sh.info.year || 0,
       genres: genresOf(sh.info.genres), added: Math.max(...eps.map(e => e.added || 0)), runtime: 0,
       is3d: eps.some(e => is3d(e.info.is3d)), sup: eps.some(e => e.super), src: 'show', poster: sh.poster,
-      sum: sh.info.summary || '', eps: eps.length });
+      sum: sh.info.summary || '', eps: eps.length, seen: eps.filter(e => e.watched).length,
+      watched: eps.every(e => e.watched), prog: eps.some(e => e.watched || e.pos) ? eps.filter(e => e.watched).length / eps.length : 0 });
   }
   return out;
 }
@@ -397,7 +417,7 @@ function renderGrid() {
   // each filter row counts what the *other* filters leave, so its numbers say what a click would show
   const pass = (t, skip) => (skip === 'kind' || F.kind === 'all' || t.kind === F.kind) &&
     (skip === 'd3' || F.d3 === 'all' || (F.d3 === '3d') === t.is3d) &&
-    (!F.sup || t.sup) &&
+    (!F.sup || t.sup) && (!F.unw || !t.watched) &&
     (skip === 'genre' || F.genre === 'all' || t.genres.includes(F.genre)) &&
     (skip === 'letter' || F.letter === 'all' || letterOf(t.title) === F.letter) &&
     (!words.length || match(t));
@@ -412,6 +432,7 @@ function renderGrid() {
   $('#f3d').innerHTML = [['all', 'All'], ['3d', '3D'], ['2d', '2D']]
     .map(([k, l]) => chip(l, F.d3 === k, `data-d="${k}"`, k === 'all' ? null : d3[k])).join(' ');
   $('#fsup').classList.toggle('on', F.sup);
+  $('#funw').classList.toggle('on', F.unw);
   $('#fsup').hidden = !all.some(t => t.sup);
 
   const gc = {}; all.filter(t => pass(t, 'genre')).forEach(t => t.genres.forEach(g => gc[g] = (gc[g] || 0) + 1));
@@ -433,7 +454,7 @@ function renderGrid() {
     runtime: (a, b) => b.runtime - a.runtime,
   }[F.sort] || (() => 0);
   const shown = all.filter(t => pass(t)).sort((a, b) => by(a, b) || sortTitle(a.title).localeCompare(sortTitle(b.title)));
-  const filtered = F.kind !== 'all' || F.d3 !== 'all' || F.sup || F.genre !== 'all' || F.letter !== 'all' || words.length;
+  const filtered = F.kind !== 'all' || F.d3 !== 'all' || F.sup || F.unw || F.genre !== 'all' || F.letter !== 'all' || words.length;
   $('#fcount').textContent = filtered ? `${shown.length} of ${all.length}` : `${all.length} titles`;
   $('#fclear').hidden = !filtered;
 
@@ -441,10 +462,11 @@ function renderGrid() {
   $('#grid').innerHTML = shown.map(t => {
     const url = t.kind === 'tvshow' ? `/api/shows/${t.id}/poster?w=280&h=400&v=${bust}` : `/api/items/${t.id}/poster?w=280&h=400&v=${bust}`;
     const tag = t.sup ? '<span class="badge r bsup">SUPER</span>' : t.src === 'filename' && !state.viewer ? '<span class="badge r bfn" title="Only the file name was recognised">CHECK</span>' : '';
-    const sub = t.kind === 'tvshow' ? `${t.eps} episode${t.eps === 1 ? '' : 's'}` : (t.year || '');
-    return `<div class="tile" data-kind="${t.kind === 'tvshow' ? 'show' : 'item'}" data-id="${t.id}" tabindex="0">
+    const sub = t.kind === 'tvshow' ? (t.seen && !t.watched ? `${t.seen} of ${t.eps} watched` : `${t.eps} episode${t.eps === 1 ? '' : 's'}`) : (t.year || '');
+    return `<div class="tile ${t.watched ? 'watched' : ''}" data-kind="${t.kind === 'tvshow' ? 'show' : 'item'}" data-id="${t.id}" tabindex="0">
       <div class="art">${t.poster ? `<img src="${url}" alt="" loading="lazy" decoding="async">` : `<div class="none">${esc(t.title)}</div>`}
-        ${t.is3d ? '<span class="badge b3d">3D</span>' : ''}${tag}</div>
+        ${t.is3d ? '<span class="badge b3d">3D</span>' : ''}${tag}
+        ${t.watched ? '<span class="seen" title="Watched">✓</span>' : t.prog ? `<div class="prog"><div style="width:${Math.max(3, t.prog * 100)}%"></div></div>` : ''}</div>
       <div class="t" title="${esc(t.title)}">${esc(t.title)}</div><div class="s">${esc(sub)}</div></div>`;
   }).join('');
   $('#grid').querySelectorAll('.tile').forEach(el => {
@@ -462,7 +484,8 @@ $('#filters').addEventListener('click', ev => {
   else if (b.dataset.g !== undefined) setF('genre', b.dataset.g || 'all');
   else if (b.dataset.l) setF('letter', b.dataset.l);
   else if (b.id === 'fsup') setF('sup', !F.sup);
-  else if (b.id === 'fclear') { Object.assign(F, { kind: 'all', d3: 'all', sup: false, genre: 'all', letter: 'all' }); $('#search').value = ''; saveF(); renderGrid(); }
+  else if (b.id === 'funw') setF('unw', !F.unw);
+  else if (b.id === 'fclear') { Object.assign(F, { kind: 'all', d3: 'all', sup: false, unw: false, genre: 'all', letter: 'all' }); $('#search').value = ''; saveF(); renderGrid(); }
 });
 $('#fsort').onchange = () => setF('sort', $('#fsort').value);
 $('#search').oninput = () => renderGrid();
@@ -493,10 +516,18 @@ function itemDetail(id) {
       </div>
     </div>
     <div class="actions"><button id="dclose" style="margin-right:auto">Close</button><button id="dedit" class="admin">Edit info</button>
+      <button id="dseen">${it.watched ? 'Mark unwatched' : 'Mark watched'}</button>
       <span id="dwatch"></span></div>`);
   $('#dclose').onclick = close;
   $('#dedit').onclick = () => itemDialog(id);
+  $('#dseen').onclick = async () => { await setWatched(id, !it.watched); itemDetail(id); };
   watchButtons(id, $('#dwatch'));
+}
+
+// watched / not, for this browser (clears its resume point either way)
+async function setWatched(id, on) {
+  await api('POST', `/api/items/${id}/watched?on=${on ? 1 : 0}&client=${encodeURIComponent(webClient)}`);
+  await loadLib();
 }
 
 // Watch / Resume for one item: resume when this browser stopped part-way
@@ -519,7 +550,7 @@ function showDetail(sid) {
     .sort((a, b) => (a.info.season - b.info.season) || (a.info.episode - b.info.episode));
   const seasons = [...new Set(eps.map(e => e.info.season))];
   const i = sh.info;
-  const meta = [i.year, `${seasons.length} season${seasons.length === 1 ? '' : 's'}`, `${eps.length} episodes`, genresOf(i.genres).join(', ')].filter(Boolean);
+  const meta = [i.year, `${seasons.length} season${seasons.length === 1 ? '' : 's'}`, `${eps.length} episode${eps.length === 1 ? '' : 's'}`, genresOf(i.genres).join(', ')].filter(Boolean);
   open(`
     <div class="detail">
       <div class="art">${sh.poster ? `<img src="/api/shows/${sid}/poster?w=340&h=486&v=${bust}" alt="">` : ''}</div>
@@ -531,10 +562,15 @@ function showDetail(sid) {
       </div>
     </div>
     <div class="seasons">${seasons.map(n => `<h4>Season ${n}</h4>` + eps.filter(e => e.info.season === n).map(x =>
-      `<div class="ep"><span class="n">E${x.info.episode}</span><span class="x">${esc(x.info.epTitle || x.info.title || '')}</span>
-        ${x.fmt ? `<span class="hint">${esc(x.fmt)}</span>` : ''}<button class="small" data-epd="${x.id}">Details</button>
+      `<div class="ep"><span class="ck" title="${x.watched ? 'Watched' : ''}">${x.watched ? '✓' : ''}</span><span class="n">E${x.info.episode}</span><span class="x">${esc(x.info.epTitle || x.info.title || '')}</span>
+        ${progOf(x) ? `<span class="bar2" title="${fmtTime(x.pos)}"><div style="width:${progOf(x) * 100}%"></div></span>` : ''}
+        ${x.fmt ? `<span class="hint hide-sm">${esc(x.fmt)}</span>` : ''}<button class="small" data-epd="${x.id}">Details</button>
         <button class="small primary play" data-epw="${x.id}" title="Watch">▶</button></div>`).join('')).join('')}</div>
-    <div class="actions"><button id="dclose" style="margin-right:auto">Close</button><button id="dedit" class="admin">Edit show</button></div>`);
+    <div class="actions"><button id="dclose" style="margin-right:auto">Close</button><button id="dedit" class="admin">Edit show</button>
+      <button id="dseen">${eps.every(e => e.watched) ? 'Mark all unwatched' : 'Mark all watched'}</button></div>`);
+  $('#dseen').onclick = async () => { const on = !eps.every(e => e.watched);
+    for (const e of eps) if (!!e.watched !== on) await api('POST', `/api/items/${e.id}/watched?on=${on ? 1 : 0}&client=${encodeURIComponent(webClient)}`);
+    await loadLib(); showDetail(sid); };
   $('#dclose').onclick = close;
   $('#dedit').onclick = () => showDialog(sid);
   document.querySelectorAll('[data-epd]').forEach(b => b.onclick = () => itemDetail(b.dataset.epd));
@@ -898,10 +934,11 @@ function stopStream(keepUI) {
 function closePlayer() {
   saveProgress(true);
   P.gen++; stopStream();
-  cancelAnimationFrame(P.raf);
+  cancelAnimationFrame(P.raf); setMirror(false);
   $('#player').hidden = true; $('#pmenu').hidden = true; document.body.style.overflow = '';
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   P.id = null;
+  setTimeout(loadLib, 400); // the tiles' progress and ticks
 }
 
 function seekTo(ms) {
@@ -965,12 +1002,33 @@ function glInit() {
   return { gl, u: n => gl.getUniformLocation(pr, n) };
 }
 
+// iPhones can't put a page element full screen, only a <video>: for the 3D views the canvas is
+// copied into a muted video (captureStream), and that goes full screen.
+const elemFS = !!(document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen);
+let mirror = null;
+function setMirror(on) {
+  if (elemFS || !pc.captureStream) on = false;
+  if (!on) { if (mirror) { mirror.srcObject = null; mirror.remove(); mirror = null; } return; }
+  if (mirror) return;
+  mirror = document.createElement('video');
+  mirror.muted = true; mirror.playsInline = true; mirror.setAttribute('playsinline', '');
+  mirror.style.cssText = 'position:absolute;left:0;top:0;width:2px;height:2px;opacity:.01;pointer-events:none';
+  mirror.srcObject = pc.captureStream(30);
+  $('#pstage').appendChild(mirror);
+  mirror.play().catch(() => {});
+  // its full-screen controls drive the real player (the sound is there)
+  mirror.addEventListener('pause', () => { if (mirror && mirror.webkitDisplayingFullscreen) pv.pause(); });
+  mirror.addEventListener('play', () => { if (mirror && mirror.webkitDisplayingFullscreen && pv.paused) pv.play(); });
+  mirror.addEventListener('webkitendfullscreen', () => { mirror && mirror.play().catch(() => {}); });
+}
+
 function setupRender() {
   const src = srcLayout(), view = viewMode();
   const canvas = view !== '2d' || src !== '2d';
   pc.hidden = !canvas; pv.classList.toggle('under', canvas);
   $('#p3d').classList.toggle('on', view !== '2d');
   cancelAnimationFrame(P.raf);
+  setMirror(canvas);
   if (!canvas) return;
   if (!P.gl && !(P.gl = glInit())) { pc.hidden = true; pv.classList.remove('under'); msg('3D needs WebGL, which this browser doesn\'t have.'); return; }
   const { gl, u } = P.gl;
@@ -984,7 +1042,8 @@ function setupRender() {
     const st = $('#pstage'), sw = st.clientWidth, sh = st.clientHeight;
     let cw = sw, ch = sw / ar; if (ch > sh) { ch = sh; cw = sh * ar; }
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const pw = Math.round(cw * dpr), ph = Math.round(ch * dpr);
+    let pw = Math.round(cw * dpr), ph = Math.round(ch * dpr);
+    if (mirror) { ph = Math.min(1080, H); pw = Math.round(ph * ar / 2) * 2; } // full-screen copy: the picture's own size
     if (pc.width !== pw || pc.height !== ph) { pc.width = pw; pc.height = ph; }
     pc.style.width = cw + 'px'; pc.style.height = ch + 'px';
     gl.viewport(0, 0, pw, ph);
@@ -1047,8 +1106,13 @@ $('#pfs').onclick = () => {
   const el = $('#player');
   if (document.fullscreenElement || document.webkitFullscreenElement) { (document.exitFullscreen || document.webkitExitFullscreen).call(document); return; }
   const req = el.requestFullscreen || el.webkitRequestFullscreen;
-  if (req) Promise.resolve(req.call(el)).then(() => screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape').catch(() => {})).catch(() => {});
-  else if (pc.hidden && pv.webkitEnterFullscreen) pv.webkitEnterFullscreen(); // iPhone: only a plain video can
+  if (req) { Promise.resolve(req.call(el)).then(() => screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape').catch(() => {})).catch(() => {}); return; }
+  // iPhone: only a video can go full screen -- the real one for 2D, the canvas's copy for 3D
+  try {
+    if (pc.hidden && pv.webkitEnterFullscreen) return pv.webkitEnterFullscreen();
+    if (mirror && mirror.readyState >= 1) return mirror.webkitEnterFullscreen();
+  } catch {}
+  msg('This browser can\'t go full screen here. Turn the phone sideways, or use Share → <b>Add to Home Screen</b> and open Big Top from there.<br><br><button class="pbtn" onclick="msg(\'\')">OK</button>');
 };
 $('#pstage').addEventListener('click', () => { if (!$('#pmenu').hidden) { $('#pmenu').hidden = true; return; } if (matchMedia('(hover: hover)').matches) pv.paused ? pv.play() : pv.pause(); showUI(); });
 $('#player').addEventListener('mousemove', showUI);

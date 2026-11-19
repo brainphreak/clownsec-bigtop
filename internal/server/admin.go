@@ -385,6 +385,8 @@ func (s *Server) adItems(w http.ResponseWriter, r *http.Request) {
 		Added    int64        `json:"added"` // unix time it was first found
 		Fmt      string       `json:"fmt"`   // container: MOFLEX, MP4, MKV...
 		DurMs    int64        `json:"dur,omitempty"`
+		Pos      int64        `json:"pos,omitempty"`     // ?client=: its resume point, ms
+		Watched  bool         `json:"watched,omitempty"` // ...and whether it has watched it
 	}
 	type S struct {
 		ID       string       `json:"id"`
@@ -395,6 +397,7 @@ func (s *Server) adItems(w http.ResponseWriter, r *http.Request) {
 		PosterBy string       `json:"posterBy,omitempty"`
 	}
 	items, shows := []I{}, []S{}
+	prog := s.Store.DB.Progress[clientID(r)] // the browser asking (each keeps its own, like each 3DS)
 	for _, it := range s.Store.DB.Items {
 		if it.Lib != id {
 			continue
@@ -404,6 +407,9 @@ func (s *Server) adItems(w http.ResponseWriter, r *http.Request) {
 			Moflex: library.IsMoflex(it.Path), Kind: s.kindOf(it), Added: it.Added, Fmt: fileFormat(it.Path)}
 		if it.Media != nil {
 			x.DurMs = it.Media.DurMs
+		}
+		if p := prog[it.ID]; p != nil {
+			x.Pos, x.Watched = p.PosMs, p.Watched
 		}
 		if it.IsEpisode() {
 			x.ShowID = library.ShowID(id, x.Info.Show)
