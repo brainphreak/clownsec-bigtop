@@ -39,8 +39,11 @@ type webRun struct {
 type webSess struct {
 	id, client, dir string
 	job             media.WebJob // the choices; Seg and the moflex fields are set per run
-	size            int64        // moflex: the file's size
-	dur             int64        // ms
+	base, size      int64        // moflex: where the moflex being played is in the file (a version: inside the trailer)
+	fileSize        int64
+	alt             int   // moflex: the extra audio track playing (AUD1 index), -1 = the in-band one
+	port            int   // Big Top's own port (FFmpeg fetches the extra audio from it)
+	dur             int64 // ms
 	nseg            int
 
 	mu     sync.Mutex
@@ -82,14 +85,18 @@ func (ws *webSess) startAt(s *Server, k int) {
 				return
 			}
 			defer f.Close()
-			st, err := moflex.KeyStart(f, ws.size, j.StartMs()*1000)
+			mf := io.NewSectionReader(f, ws.base, ws.size)
+			st, err := moflex.KeyStart(mf, ws.size, j.StartMs()*1000)
 			if err != nil {
 				st = moflex.Start{}
 			}
-			j.In = io.NewSectionReader(f, st.Off, ws.size-st.Off)
+			j.In = io.NewSectionReader(mf, st.Off, ws.size-st.Off)
 			j.GapMs = j.StartMs() - st.Us/1000
 			if j.GapMs < 0 {
 				j.GapMs = 0
+			}
+			if ws.alt >= 0 { // the extra track, from the same moment as the video input
+				j.AltAudio = fmt.Sprintf("http://127.0.0.1:%d/api/web/%s/alt.pcm?ms=%d", ws.port, ws.id, st.Us/1000)
 			}
 		}
 		if err := s.Media.WebTranscode(ctx, j, ws.dir); err != nil {
@@ -200,8 +207,12 @@ type webOut struct {
 	View   string     `json:"view"`            // how the item is labelled: "2d", "3d", "hsbs", "fsbs"
 	Audio  []TrackOut `json:"audio,omitempty"`
 	AudioN int        `json:"audioN"` // the track playing (index into audio), -1 = default
-	Title  string     `json:"title"`
-	Pos    int64      `json:"pos,omitempty"` // this browser's resume point, ms
+	// a super moflex's video versions (the main one first) and the one playing
+	Versions []webSub `json:"versions,omitempty"`
+	VersionN int      `json:"versionN"`
+	Subs     []webSub `json:"subs"` // subtitle tracks (/api/items/{id}/websubs/{n})
+	Title    string   `json:"title"`
+	Pos      int64    `json:"pos,omitempty"` // this browser's resume point, ms
 }
 
 // GET /api/items/{id}/web?at=ms&audio=n&src=2d|hsbs|fsbs&view=anaglyph|fsbs|hsbs|2d&swap=1&client=x
@@ -241,7 +252,7 @@ func (s *Server) apiWeb(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := webOut{Title: title, View: label, AudioN: -1, Pos: pos}
-	ws := &webSess{client: client, last: time.Now()}
+	ws := &webSess{client: client, last: time.Now(), alt: -1, port: s.Cfg.Snapshot().Port}
 	j := media.WebJob{Path: path, Audio: -1}
 
 	if library.IsMoflex(path) {
@@ -251,9 +262,49 @@ func (s *Server) apiWeb(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		st, _ := f.Stat()
-		info := moflex.Probe(f, st.Size())
+		ws.fileSize, ws.size = st.Size(), st.Size()
+		// a super moflex: its extra audio tracks and video versions
+		if sup, err := moflex.ReadSuper(f, st.Size()); err == nil {
+			nm := func(l, def string) string {
+				if n := langName(l); n != "" {
+					return n
+				}
+				if l != "" {
+					return l
+				}
+				return def
+			}
+			if len(sup.AltAudios) > 0 {
+				out.Audio = append(out.Audio, TrackOut{N: 0, Name: nm(sup.AudioLang, "Audio 1"), Default: true})
+				for i, l := range sup.AltAudios {
+					out.Audio = append(out.Audio, TrackOut{N: i + 1, Name: nm(l, fmt.Sprintf("Audio %d", i+2))})
+				}
+				if n, err := strconv.Atoi(q.Get("audio")); err == nil && n > 0 && n <= len(sup.AltAudios) {
+					if a, err := moflex.Audio(f, st.Size(), n-1); err == nil {
+						ws.alt, j.AltRate, j.AltChans, out.AudioN = n-1, a.Rate, a.Channels, n
+					}
+				}
+			}
+			if len(sup.Versions) > 0 {
+				main := sup.MainLabel
+				if main == "" {
+					main = "Main"
+				}
+				out.Versions = append(out.Versions, webSub{0, main})
+				for i, l := range sup.Versions {
+					out.Versions = append(out.Versions, webSub{i + 1, l})
+				}
+				if n, err := strconv.Atoi(q.Get("version")); err == nil && n > 0 && n <= len(sup.Versions) {
+					if v, err := moflex.Version(f, st.Size(), n-1); err == nil {
+						off, size := versionRange(v)
+						ws.base, ws.size, out.VersionN = off, size, n
+					}
+				}
+			}
+		}
+		info := moflex.Probe(io.NewSectionReader(f, ws.base, ws.size), ws.size)
 		f.Close()
-		ws.size, out.Dur = st.Size(), info.DurUs/1000
+		out.Dur = info.DurUs / 1000
 		j.Moflex, j.Stereo = true, info.Stereo
 		j.Num, j.Den = info.TbDen, info.TbNum
 		if info.TbEye { // Nintendo's 3D files declare the eye rate
@@ -297,6 +348,10 @@ func (s *Server) apiWeb(w http.ResponseWriter, r *http.Request) {
 		at = 0
 	}
 	out.Frame = j.Frame
+	out.Subs = s.webSubList(id, path)
+	if out.Subs == nil {
+		out.Subs = []webSub{}
+	}
 	ws.job, ws.dur = j, out.Dur
 	ws.nseg = int((out.Dur + media.SegSec*1000 - 1) / (media.SegSec * 1000))
 
@@ -399,6 +454,42 @@ func (s *Server) apiWebFile(w http.ResponseWriter, r *http.Request) {
 	if k > 90 {
 		os.Remove(ws.seg(k - 90))
 	}
+}
+
+// versionRange: where a version's moflex is in the file.
+func versionRange(v *io.SectionReader) (int64, int64) {
+	_, off, n := v.Outer()
+	return off, n
+}
+
+// GET /api/web/{sid}/alt.pcm?ms=: the session's extra audio track as raw PCM from a time -- for
+// its FFmpeg only (this computer).
+func (s *Server) apiWebAltPCM(w http.ResponseWriter, r *http.Request) {
+	if !isLocal(r) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	webs.Lock()
+	ws := webs.m[r.PathValue("sid")]
+	webs.Unlock()
+	if ws == nil || ws.alt < 0 {
+		http.NotFound(w, r)
+		return
+	}
+	f, err := os.Open(ws.job.Path)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer f.Close()
+	a, err := moflex.Audio(f, ws.fileSize, ws.alt)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	ms, _ := strconv.ParseInt(r.URL.Query().Get("ms"), 10, 64)
+	w.Header().Set("Content-Type", "application/octet-stream")
+	io.Copy(w, a.PCM(ms))
 }
 
 // POST /api/web/{sid}/stop: the player closed.

@@ -49,6 +49,11 @@ type WebJob struct {
 	View  string
 	Swap  bool
 
+	// AltAudio: a moflex's extra audio track as raw PCM (s16le) from this URL -- Big Top's own,
+	// starting where the moflex input does -- instead of the in-band track
+	AltAudio          string
+	AltRate, AltChans int
+
 	noReadrate bool // an FFmpeg older than 6.1 doesn't know -readrate_initial_burst
 }
 
@@ -102,6 +107,11 @@ func WebArgs(j WebJob, dir string) []string {
 		// FFmpeg times moflex video by counting frames at the declared rate, so the pictures are
 		// re-timed here; 3D: the even frames are the left eye, the odd ones the right
 		a = append(a, "-f", "moflex", "-i", "pipe:0")
+		amap := "0:a:0?"
+		if j.AltAudio != "" {
+			a = append(a, "-f", "s16le", "-ar", fmt.Sprint(j.AltRate), "-ac", fmt.Sprint(j.AltChans), "-i", j.AltAudio)
+			amap = "1:a:0"
+		}
 		var vf string
 		if j.Stereo {
 			vf = fmt.Sprintf("[0:v:0]split[a][b];[a]select='not(mod(n\\,2))',setpts=N/(%s)/TB[l];"+
@@ -112,7 +122,7 @@ func WebArgs(j WebJob, dir string) []string {
 		} else {
 			vf = fmt.Sprintf("[0:v:0]setpts=N/(%s)/TB", r)
 		}
-		a = append(a, "-filter_complex", vf+",format=yuv420p[v]", "-map", "[v]", "-map", "0:a:0?", "-r", r)
+		a = append(a, "-filter_complex", vf+",format=yuv420p[v]", "-map", "[v]", "-map", amap, "-r", r)
 		if j.GapMs > 0 {
 			a = append(a, "-ss", fmt.Sprintf("%.3f", float64(j.GapMs)/1000))
 		}

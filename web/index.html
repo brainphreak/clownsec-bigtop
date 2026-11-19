@@ -125,6 +125,13 @@ body.viewer .admin { display: none !important; }   /* an inline display:flex wou
 #pvid { width: 100%; height: 100%; object-fit: contain; background: #000; }
 #pvid.under { opacity: 0; pointer-events: none; }
 #pcan { display: block; }
+/* subtitles: one box per eye, laid over the picture */
+#psubs { position: absolute; inset: 0; pointer-events: none; }
+#psubs .eye { position: absolute; display: flex; align-items: flex-end; justify-content: center; overflow: hidden; }
+#psubs .ln { color: #fff; text-align: center; line-height: 1.25; font-weight: 600; white-space: pre-line; padding: 0 4%;
+  text-shadow: 0 0 3px #000, 0 0 3px #000, 1px 1px 2px #000, -1px -1px 2px #000; }
+#psubs .sq { transform: scaleX(.5); transform-origin: center bottom; }  /* half SBS: squeezed like the picture */
+#player.idle #psubs .eye { transition: none; }
 .pui { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: space-between; transition: opacity .25s; }
 #player.idle .pui { opacity: 0; cursor: none; }
 .ptop { display: flex; gap: 10px; align-items: center; padding: max(12px, env(safe-area-inset-top)) 16px 30px; background: linear-gradient(#000c, #0000); }
@@ -211,7 +218,7 @@ body.viewer .admin { display: none !important; }   /* an inline display:flex wou
 <dialog id="dlg"><div class="dlg" id="dlgbody"></div></dialog>
 
 <div id="player" hidden>
-  <div id="pstage"><video id="pvid" playsinline webkit-playsinline preload="auto"></video><canvas id="pcan" hidden></canvas></div>
+  <div id="pstage"><video id="pvid" playsinline webkit-playsinline preload="auto"></video><canvas id="pcan" hidden></canvas><div id="psubs"></div></div>
   <div class="pcenter"><div class="pspin" id="pspin" hidden></div></div>
   <div class="pcenter"><div class="pmsg" id="pmsg" hidden></div></div>
   <div class="pui" id="pui">
@@ -225,7 +232,8 @@ body.viewer .admin { display: none !important; }   /* an inline display:flex wou
         <span class="ptime" id="ptime">0:00</span>
         <span class="grow"></span>
         <input type="range" id="pvol" min="0" max="1" step="0.05" value="1" title="Volume">
-        <button class="pbtn" id="paud" hidden title="Audio track">Audio</button>
+        <button class="pbtn" id="pcc" hidden title="Subtitles">CC</button>
+        <button class="pbtn" id="paud" hidden title="Audio track / version">Audio</button>
         <button class="pbtn" id="p3d" title="3D view">3D</button>
         <button class="pbtn" id="pfs" title="Full screen (f)">⛶</button>
       </div>
@@ -877,7 +885,7 @@ const now = () => P.sess ? (pv.readyState ? pv.currentTime : P.startAt) * 1000 :
 
 async function watch(id, at) {
   const it = libData.items.find(x => x.id === id);
-  P.id = id; P.ended = false; P.audioN = -1;
+  P.id = id; P.ended = false; P.audioN = -1; P.cues = []; $('#pcc').classList.remove('on');
   $('#player').hidden = false; document.body.style.overflow = 'hidden';
   $('#ptitle').textContent = it ? (it.showId ? `${it.info.show} · S${it.info.season}E${it.info.episode} ${it.info.epTitle || ''}` : it.info.title) : '';
   pv.volume = +lsGet('bt.vol', 1); $('#pvol').value = pv.volume;
@@ -895,7 +903,9 @@ async function start(at) {
   let s;
   try {
     const q = new URLSearchParams({ at: Math.round(at), client: webClient });
-    if (P.audioN >= 0) q.set('audio', P.audioN);
+    const aud = lsGet('bt.aud.' + P.id, ''), ver = lsGet('bt.ver.' + P.id, '');
+    if (aud) q.set('audio', aud);
+    if (ver) q.set('version', ver);
     const own = lsGet('bt.src.' + P.id, '');
     if (own) q.set('src', own);
     if (bakeMode()) { q.set('view', viewMode()); if (swapped()) q.set('swap', '1'); }
@@ -903,7 +913,9 @@ async function start(at) {
   } catch (x) { if (gen === P.gen) { spin(false); msg(esc(x.message)); } return; }
   if (gen !== P.gen) { fetch(s.url.replace('index.m3u8', 'stop'), { method: 'POST' }); return; }
   P.sess = s; P.base = 0; P.startAt = at / 1000;
-  $('#paud').hidden = !(s.audio && s.audio.length > 1);
+  $('#paud').hidden = !((s.audio && s.audio.length > 1) || (s.versions && s.versions.length > 1));
+  $('#pcc').hidden = !(s.subs && s.subs.length);
+  loadSubs();
   let Hls;
   try { Hls = await needHls(); } catch (x) { spin(false); msg(esc(x.message)); return; }
   if (gen !== P.gen) return;
@@ -1134,11 +1146,85 @@ function menu3d() {
   });
   $('#pswap').onchange = ev => { lsSet('bt.swap.' + P.id, ev.target.checked ? '1' : null); if (P.sess && P.sess.baked) start(now()); };
 }
+// audio track and video version: each choice is this video's, and a new stream from here
+// (a moflex's track 0 is its default, so it isn't stored)
 function menuAudio() {
-  const m = $('#pmenu'), a = (P.sess && P.sess.audio) || [], cur = P.sess ? P.sess.audioN : -1;
-  m.innerHTML = '<h5>Audio</h5>' + a.map(t => `<button data-a="${t.n}" class="${cur === t.n || (cur < 0 && t.default) ? 'on' : ''}">${esc(t.name)}</button>`).join('');
+  const m = $('#pmenu'), s = P.sess || {}, a = s.audio || [], v = s.versions || [];
+  const cur = s.audioN, vcur = s.versionN || 0;
+  m.innerHTML = (a.length > 1 ? '<h5>Audio</h5>' + a.map(t => `<button data-a="${t.n}" class="${cur === t.n || (cur < 0 && t.default) ? 'on' : ''}">${esc(t.name)}</button>`).join('') : '') +
+    (v.length > 1 ? '<h5>Version</h5>' + v.map(t => `<button data-ver="${t.n}" class="${vcur === t.n ? 'on' : ''}">${esc(t.name)}</button>`).join('') : '');
   m.hidden = false;
-  m.querySelectorAll('[data-a]').forEach(b => b.onclick = () => { P.audioN = +b.dataset.a; m.hidden = true; start(now()); });
+  m.querySelectorAll('[data-a]').forEach(b => b.onclick = () => { lsSet('bt.aud.' + P.id, +b.dataset.a > 0 || !itemOf().moflex ? b.dataset.a : null); m.hidden = true; start(now()); });
+  m.querySelectorAll('[data-ver]').forEach(b => b.onclick = () => { lsSet('bt.ver.' + P.id, +b.dataset.ver ? b.dataset.ver : null); m.hidden = true; start(now()); });
+}
+const itemOf = () => libData.items.find(x => x.id === P.id) || {};
+
+// ----- subtitles: drawn over the picture, once per eye in side-by-side views. Where Big Top draws
+// the 3D (an iPhone's own full-screen player shows only text tracks), a WebVTT track instead --
+// with every line twice, one per half, for side by side.
+P.cues = []; P.subText = null;
+async function loadSubs() {
+  const n = lsGet('bt.sub.' + P.id, ''), id = P.id;
+  P.cues = []; drawSubs(true);
+  [...pv.querySelectorAll('track')].forEach(t => t.remove());
+  if (n === '' || !P.sess || !P.sess.subs.some(t => t.n === +n)) return;
+  $('#pcc').classList.add('on');
+  if (P.sess.baked) {
+    const tr = document.createElement('track');
+    tr.kind = 'subtitles'; tr.default = true; tr.label = P.sess.subs[+n].name;
+    tr.src = `/api/items/${id}/websubs/${n}.vtt?eyes=${['fsbs', 'hsbs'].includes(P.sess.baked) ? 2 : 1}`;
+    pv.appendChild(tr);
+    tr.addEventListener('load', () => { tr.track.mode = 'showing'; });
+    tr.track.mode = 'showing';
+    return;
+  }
+  try { const c = await api('GET', `/api/items/${id}/websubs/${n}`); if (P.id === id) P.cues = c; } catch {}
+}
+function subAt(ms) {
+  // cues are sorted by start; the lines showing now (several can overlap)
+  let lo = 0, hi = P.cues.length;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (P.cues[mid][0] <= ms) lo = mid + 1; else hi = mid; }
+  const out = [];
+  for (let i = lo - 1; i >= 0 && i >= lo - 12; i--) if (P.cues[i][1] > ms) out.unshift(P.cues[i][2]);
+  return out.join('\n');
+}
+let subGeo = '';
+function drawSubs(force) {
+  const box = $('#psubs');
+  const text = P.cues.length ? subAt(now()) : '';
+  if (!text) { if (box.childElementCount) box.innerHTML = ''; subGeo = ''; return; }
+  // the picture's rectangle in the stage
+  const st = $('#pstage').getBoundingClientRect();
+  let r;
+  if (!pc.hidden) r = pc.getBoundingClientRect();
+  else {
+    const W = pv.videoWidth || 16, H = pv.videoHeight || 9, sw = st.width, sh = st.height;
+    let w = sw, h = sw * H / W; if (h > sh) { h = sh; w = sh * W / H; }
+    r = { left: st.left + (sw - w) / 2, top: st.top + (sh - h) / 2, width: w, height: h };
+  }
+  const view = pc.hidden ? '2d' : viewMode();
+  const two = view === 'fsbs' || view === 'hsbs';
+  const fs = Math.max(12, Math.min(46, r.height * (two && view === 'fsbs' ? 0.06 : 0.055)));
+  // above the controls while they show
+  const ui = !$('#player').classList.contains('idle') ? $('.pbot').offsetHeight : 0;
+  const lift = Math.max(r.height * 0.06, ui - (st.top + st.height - (r.top + r.height)));
+  const geo = [text, view, r.left, r.top, r.width, r.height, lift].join('|');
+  if (geo === subGeo && !force) return;
+  subGeo = geo;
+  const x0 = r.left - st.left, y0 = r.top - st.top, eyeW = two ? r.width / 2 : r.width;
+  const one = i => `<div class="eye" style="left:${x0 + i * eyeW}px;top:${y0}px;width:${eyeW}px;height:${r.height}px;padding-bottom:${lift}px">
+    <div class="ln ${view === 'hsbs' ? 'sq' : ''}" style="font-size:${fs}px;${view === 'hsbs' ? 'width:200%;flex:none' : ''}">${esc(text)}</div></div>`;
+  box.innerHTML = two ? one(0) + one(1) : one(0);
+}
+(function subLoop() { requestAnimationFrame(subLoop); if (!$('#player').hidden) drawSubs(false); })();
+function menuCC() {
+  const m = $('#pmenu'), cur = lsGet('bt.sub.' + P.id, ''), subs = (P.sess && P.sess.subs) || [];
+  m.innerHTML = '<h5>Subtitles</h5>' + `<button data-cc="" class="${cur === '' ? 'on' : ''}">Off</button>` +
+    subs.map(t => `<button data-cc="${t.n}" class="${cur === String(t.n) ? 'on' : ''}">${esc(t.name)}</button>`).join('');
+  m.hidden = false;
+  m.querySelectorAll('[data-cc]').forEach(b => b.onclick = () => {
+    lsSet('bt.sub.' + P.id, b.dataset.cc || null); $('#pcc').classList.toggle('on', !!b.dataset.cc); m.hidden = true; loadSubs();
+  });
 }
 const toggleMenu = (k, fill) => ev => {
   ev.stopPropagation();
@@ -1148,6 +1234,7 @@ const toggleMenu = (k, fill) => ev => {
 };
 $('#p3d').onclick = toggleMenu('3d', menu3d);
 $('#paud').onclick = toggleMenu('a', menuAudio);
+$('#pcc').onclick = toggleMenu('cc', menuCC);
 window.addEventListener('pagehide', () => { if (P.id) { saveProgress(true); stopStream(); } });
 
 let polling = false;

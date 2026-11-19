@@ -57,6 +57,9 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("GET /api/items/{id}/web", s.apiWeb)
 	m.HandleFunc("GET /api/web/{sid}/{name}", s.apiWebFile)
 	m.HandleFunc("POST /api/web/{sid}/stop", s.apiWebStop)
+	m.HandleFunc("GET /api/items/{id}/websubs", s.apiWebSubs)
+	m.HandleFunc("GET /api/items/{id}/websubs/{n}", s.apiWebSub)
+	m.HandleFunc("GET /api/web/{sid}/alt.pcm", s.apiWebAltPCM)
 	// ---- the setup page ----
 	s.adminRoutes(m)
 	return logRequests(m)

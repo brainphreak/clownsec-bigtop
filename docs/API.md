@@ -153,6 +153,16 @@ item's 3D label. One stream per `client`: a new one stops the one before.
 ### `GET /api/web/{sid}/{index.m3u8 | sNNNNN.ts}`
 The playlist and segments. `410` once the stream has ended (stopped, replaced, or 5 minutes unused).
 
+More query options: `audio=<n>` and `version=<n>` pick a track from the answer's `audio` and
+`versions` (a super moflex's extra audio tracks and video versions; an MP4/MKV's audio tracks). The
+answer also lists `subs`, the subtitle tracks.
+
+### `GET /api/items/{id}/websubs` · `GET /api/items/{id}/websubs/{n}` · `…/{n}.vtt?eyes=2`
+Every text subtitle track an item has -- a super moflex's own (its trailer), files beside the video,
+an MKV/MP4's text tracks -- as `[{"n":0,"name":"English"}]`; one track as `[[startMs, endMs, "text"],
+…]` (SRT and ASS, plain text), or as WebVTT. `eyes=2` writes every line twice, centred in each half,
+for a side-by-side picture in a player that only draws text tracks (an iPhone's full screen).
+
 ### `POST /api/web/{sid}/stop`
 Stop a stream (the player closed). → `204`.
 

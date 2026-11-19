@@ -201,6 +201,13 @@ on your network (open `http://<the Big Top computer's address>:32500/`).
   **Side by side — full** or **— half** for 3D TVs, projectors and VR viewers (go full screen), or
   **2D**. *This video is* sets the file's own layout (2D / Half SBS / Full SBS) when Big Top's guess
   from its name or super moflex info is wrong; *Swap eyes* if the depth looks inside out.
+- **Subtitles** (CC): a super moflex's own, files beside the video and an MKV/MP4's text tracks. In
+  3D each eye gets its own copy (side by side), drawn at the screen's depth. **Audio** picks the
+  audio track — a super moflex's extra languages too — and the video **version** of a super moflex
+  that has several. Every choice is remembered per video.
+- On an **iPhone**, full screen is the phone's own video player: Big Top draws the chosen 3D view
+  into the video itself, and its scrubber and skip buttons work across the whole film. Or add the
+  page to the Home Screen (Share → Add to Home Screen) to watch without Safari's bars.
 - On other devices the page is **browse-and-watch only**: libraries, scanning, settings and editing
   stay on the Big Top computer (unless *Allow this setup page from other computers* is on).
 
