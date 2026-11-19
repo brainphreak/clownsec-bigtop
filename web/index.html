@@ -873,7 +873,7 @@ function srcLayout() { return lsGet('bt.src.' + P.id, '') || (P.sess && P.sess.f
 // anaglyph), and a change is remembered for that video only.
 function viewMode() { return srcLayout() === '2d' ? '2d' : lsGet('bt.view.' + P.id, 'anaglyph'); }
 const swapped = () => lsGet('bt.swap.' + P.id, '0') === '1';
-const now = () => P.sess ? P.sess.start + Math.max(0, pv.currentTime - P.base) * 1000 : 0;
+const now = () => P.sess ? (pv.readyState ? pv.currentTime : P.startAt) * 1000 : 0;
 
 async function watch(id, at) {
   const it = libData.items.find(x => x.id === id);
@@ -896,22 +896,30 @@ async function start(at) {
   try {
     const q = new URLSearchParams({ at: Math.round(at), client: webClient });
     if (P.audioN >= 0) q.set('audio', P.audioN);
+    const own = lsGet('bt.src.' + P.id, '');
+    if (own) q.set('src', own);
+    if (bakeMode()) { q.set('view', viewMode()); if (swapped()) q.set('swap', '1'); }
     s = await api('GET', `/api/items/${P.id}/web?${q}`);
   } catch (x) { if (gen === P.gen) { spin(false); msg(esc(x.message)); } return; }
   if (gen !== P.gen) { fetch(s.url.replace('index.m3u8', 'stop'), { method: 'POST' }); return; }
-  P.sess = s; P.base = 0;
+  P.sess = s; P.base = 0; P.startAt = at / 1000;
   $('#paud').hidden = !(s.audio && s.audio.length > 1);
   let Hls;
   try { Hls = await needHls(); } catch (x) { spin(false); msg(esc(x.message)); return; }
   if (gen !== P.gen) return;
   if (Hls && Hls.isSupported()) {
-    const h = new Hls({ startPosition: 0, maxBufferLength: 30, backBufferLength: 60, liveSyncDurationCount: 3, liveMaxLatencyDurationCount: Infinity });
+    const h = new Hls({ startPosition: at / 1000, maxBufferLength: 30, backBufferLength: 60,
+      // a part not converted yet takes Big Top a moment to start on
+      fragLoadPolicy: { default: { maxTimeToFirstByteMs: 45000, maxLoadTimeMs: 90000,
+        timeoutRetry: { maxNumRetry: 2, retryDelayMs: 0, maxRetryDelayMs: 0 },
+        errorRetry: { maxNumRetry: 3, retryDelayMs: 1000, maxRetryDelayMs: 8000 } } } });
     P.hls = h; P.native = false;
     if (!window.MediaSource) pv.disableRemotePlayback = true; // iPhone's Managed Media Source requires it
     h.on(Hls.Events.ERROR, (_, d) => { if (d.fatal) console.warn('player:', d.type, d.details, d.response ? d.response.code : ''); if (d.fatal && gen === P.gen) recover(); });
     h.loadSource(s.url); h.attachMedia(pv);
   } else if (pv.canPlayType('application/vnd.apple.mpegurl')) {
     P.native = true; pv.src = s.url;
+    pv.addEventListener('loadedmetadata', () => { if (at > 0) pv.currentTime = at / 1000; }, { once: true });
   } else { spin(false); msg('This browser can\'t play the stream.'); return; }
   pv.play().catch(() => {});
   setupRender();
@@ -934,21 +942,18 @@ function stopStream(keepUI) {
 function closePlayer() {
   saveProgress(true);
   P.gen++; stopStream();
-  cancelAnimationFrame(P.raf); setMirror(false);
+  cancelAnimationFrame(P.raf);
   $('#player').hidden = true; $('#pmenu').hidden = true; document.body.style.overflow = '';
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   P.id = null;
   setTimeout(loadLib, 400); // the tiles' progress and ticks
 }
 
+// the stream is the whole film: a seek just moves (Big Top makes the part if it isn't there yet)
 function seekTo(ms) {
   if (!P.sess) return;
   const d = P.sess.dur || Infinity;
-  ms = Math.max(0, Math.min(ms, d - 1000));
-  // inside what's loaded: just move there; else a new stream from that time
-  const t = P.base + (ms - P.sess.start) / 1000, b = pv.buffered;
-  for (let i = 0; i < b.length; i++) if (t >= b.start(i) && t <= b.end(i) - 0.5) { pv.currentTime = t; return; }
-  start(ms);
+  pv.currentTime = Math.max(0, Math.min(ms, d - 1000)) / 1000;
 }
 
 function saveProgress(stopped) {
@@ -1002,33 +1007,17 @@ function glInit() {
   return { gl, u: n => gl.getUniformLocation(pr, n) };
 }
 
-// iPhones can't put a page element full screen, only a <video>: for the 3D views the canvas is
-// copied into a muted video (captureStream), and that goes full screen.
+// iPhones can't put a page element full screen, only a <video>: there, Big Top draws the 3D view into
+// the picture itself (FFmpeg), so the plain video -- with its own full-screen controls -- shows it.
 const elemFS = !!(document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen);
-let mirror = null;
-function setMirror(on) {
-  if (elemFS || !pc.captureStream) on = false;
-  if (!on) { if (mirror) { mirror.srcObject = null; mirror.remove(); mirror = null; } return; }
-  if (mirror) return;
-  mirror = document.createElement('video');
-  mirror.muted = true; mirror.playsInline = true; mirror.setAttribute('playsinline', '');
-  mirror.style.cssText = 'position:absolute;left:0;top:0;width:2px;height:2px;opacity:.01;pointer-events:none';
-  mirror.srcObject = pc.captureStream(30);
-  $('#pstage').appendChild(mirror);
-  mirror.play().catch(() => {});
-  // its full-screen controls drive the real player (the sound is there)
-  mirror.addEventListener('pause', () => { if (mirror && mirror.webkitDisplayingFullscreen) pv.pause(); });
-  mirror.addEventListener('play', () => { if (mirror && mirror.webkitDisplayingFullscreen && pv.paused) pv.play(); });
-  mirror.addEventListener('webkitendfullscreen', () => { mirror && mirror.play().catch(() => {}); });
-}
+const bakeMode = () => !elemFS && srcLayout() !== '2d';
 
 function setupRender() {
   const src = srcLayout(), view = viewMode();
-  const canvas = view !== '2d' || src !== '2d';
+  const canvas = (view !== '2d' || src !== '2d') && !(P.sess && P.sess.baked);
   pc.hidden = !canvas; pv.classList.toggle('under', canvas);
   $('#p3d').classList.toggle('on', view !== '2d');
   cancelAnimationFrame(P.raf);
-  setMirror(canvas);
   if (!canvas) return;
   if (!P.gl && !(P.gl = glInit())) { pc.hidden = true; pv.classList.remove('under'); msg('3D needs WebGL, which this browser doesn\'t have.'); return; }
   const { gl, u } = P.gl;
@@ -1042,8 +1031,7 @@ function setupRender() {
     const st = $('#pstage'), sw = st.clientWidth, sh = st.clientHeight;
     let cw = sw, ch = sw / ar; if (ch > sh) { ch = sh; cw = sh * ar; }
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    let pw = Math.round(cw * dpr), ph = Math.round(ch * dpr);
-    if (mirror) { ph = Math.min(1080, H); pw = Math.round(ph * ar / 2) * 2; } // full-screen copy: the picture's own size
+    const pw = Math.round(cw * dpr), ph = Math.round(ch * dpr);
     if (pc.width !== pw || pc.height !== ph) { pc.width = pw; pc.height = ph; }
     pc.style.width = cw + 'px'; pc.style.height = ch + 'px';
     gl.viewport(0, 0, pw, ph);
@@ -1068,7 +1056,6 @@ function tick() {
   if (!P.dragging) { $('#pseek').max = d || 1; $('#pseek').value = t; }
   $('#ptime').textContent = d ? `${fmtTime(P.dragging ? +$('#pseek').value : t)} / ${fmtTime(d)}` : fmtTime(t);
 }
-pv.addEventListener('loadeddata', () => { const b = pv.buffered; P.base = b.length ? b.start(0) : 0; if (pv.currentTime < P.base) pv.currentTime = P.base; });
 pv.addEventListener('playing', () => { spin(false); msg(''); $('#pplay').textContent = '❚❚'; showUI(); });
 pv.addEventListener('pause', () => { $('#pplay').textContent = '▶'; showUI(); saveProgress(false); });
 pv.addEventListener('waiting', () => spin(true));
@@ -1107,11 +1094,8 @@ $('#pfs').onclick = () => {
   if (document.fullscreenElement || document.webkitFullscreenElement) { (document.exitFullscreen || document.webkitExitFullscreen).call(document); return; }
   const req = el.requestFullscreen || el.webkitRequestFullscreen;
   if (req) { Promise.resolve(req.call(el)).then(() => screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape').catch(() => {})).catch(() => {}); return; }
-  // iPhone: only a video can go full screen -- the real one for 2D, the canvas's copy for 3D
-  try {
-    if (pc.hidden && pv.webkitEnterFullscreen) return pv.webkitEnterFullscreen();
-    if (mirror && mirror.readyState >= 1) return mirror.webkitEnterFullscreen();
-  } catch {}
+  // iPhone: only a video can go full screen (3D is drawn into it by Big Top there)
+  try { if (pv.webkitEnterFullscreen) return pv.webkitEnterFullscreen(); } catch {}
   msg('This browser can\'t go full screen here. Turn the phone sideways, or use Share → <b>Add to Home Screen</b> and open Big Top from there.<br><br><button class="pbtn" onclick="msg(\'\')">OK</button>');
 };
 $('#pstage').addEventListener('click', () => { if (!$('#pmenu').hidden) { $('#pmenu').hidden = true; return; } if (matchMedia('(hover: hover)').matches) pv.paused ? pv.play() : pv.pause(); showUI(); });
@@ -1139,9 +1123,16 @@ function menu3d() {
     ${Object.entries(SRCS).map(([k, l]) => `<button data-s="${k}" class="${own === k ? 'on' : ''}">${l}</button>`).join('')}
     ${src === '2d' ? '<div class="hint">A 2D video plays in 2D. If it’s really two pictures side by side, pick its layout above.</div>' : ''}`;
   m.hidden = false;
-  m.querySelectorAll('[data-v]').forEach(b => b.onclick = () => { lsSet('bt.view.' + P.id, b.dataset.v === 'anaglyph' ? null : b.dataset.v); setupRender(); menu3d(); });
-  m.querySelectorAll('[data-s]').forEach(b => b.onclick = () => { lsSet('bt.src.' + P.id, b.dataset.s || null); setupRender(); menu3d(); });
-  $('#pswap').onchange = ev => { lsSet('bt.swap.' + P.id, ev.target.checked ? '1' : null); };
+  // where Big Top draws the 3D (iPhones), a change is a new stream from here; else just a redraw
+  const apply = () => { if (!elemFS || (P.sess && P.sess.baked)) start(now()); else setupRender(); menu3d(); };
+  m.querySelectorAll('[data-v]').forEach(b => b.onclick = () => { lsSet('bt.view.' + P.id, b.dataset.v === 'anaglyph' ? null : b.dataset.v); apply(); });
+  m.querySelectorAll('[data-s]').forEach(b => b.onclick = () => {
+    lsSet('bt.src.' + P.id, b.dataset.s || null);
+    // an MP4's layout decides how Big Top shapes the picture: a new stream from here
+    const it = libData.items.find(x => x.id === P.id);
+    if (it && !it.moflex) start(now()); else apply();
+  });
+  $('#pswap').onchange = ev => { lsSet('bt.swap.' + P.id, ev.target.checked ? '1' : null); if (P.sess && P.sess.baked) start(now()); };
 }
 function menuAudio() {
   const m = $('#pmenu'), a = (P.sess && P.sess.audio) || [], cur = P.sess ? P.sess.audioN : -1;

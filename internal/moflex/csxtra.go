@@ -11,6 +11,9 @@
 //	  LNG0  char[4] language of the in-band audio ("ENG")
 //	  SUB0  .srt bytes (old)       SUB1  char[4] language, then .srt/.ass bytes
 //	  AUD1  u32 rate, u16 channels, u16 samples/packet, char[4] language, ADPCM packets
+//	        (repeats: one per extra audio track, tracks 2..8)
+//	  VID1  char[8] label, then a whole block-only moflex: an alternate video version
+//	  VLB0  char[8] label of the main (in-band) video version
 //
 // Only section headers are read for SUB/AUD, so a file on a network share costs a few small reads.
 package moflex
@@ -34,8 +37,11 @@ type Super struct {
 	Info      map[string]string // NFO0 fields
 	Poster    image.Image       // ART5, nil if none
 	AudioLang string            // LNG0: the in-band track
-	AltAudio  string            // AUD1's language: the second audio track ("" = none)
+	AltAudio  string            // the first AUD1's language: the second audio track ("" = none)
+	AltAudios []string          // every AUD1's language, in file order (tracks 2, 3, ...)
 	SubLangs  []string          // SUB1 languages, in file order ("SUB" for SUB0)
+	Versions  []string          // VID1 labels: alternate video versions, in file order
+	MainLabel string            // VLB0: the main version's label ("" = unnamed)
 }
 
 // Title etc. read NFO0 fields with the conversions every caller wants.
@@ -117,7 +123,32 @@ func ReadSuper(r io.ReaderAt, size int64) (*Super, error) {
 			b := make([]byte, 12)
 			if n >= 12 {
 				if _, err := r.ReadAt(b, data); err == nil {
-					s.AltAudio = cstr(b[8:12])
+					l := cstr(b[8:12])
+					if l == "" {
+						l = "A" + strconv.Itoa(len(s.AltAudios)+2)
+					}
+					if s.AltAudio == "" {
+						s.AltAudio = l
+					}
+					s.AltAudios = append(s.AltAudios, l)
+				}
+			}
+		case "VID1":
+			b := make([]byte, 8)
+			if n > 8 {
+				if _, err := r.ReadAt(b, data); err == nil {
+					l := cstr(b)
+					if l == "" {
+						l = "V" + strconv.Itoa(len(s.Versions)+2)
+					}
+					s.Versions = append(s.Versions, l)
+				}
+			}
+		case "VLB0":
+			b := make([]byte, 8)
+			if n >= 8 {
+				if _, err := r.ReadAt(b, data); err == nil {
+					s.MainLabel = cstr(b)
 				}
 			}
 		}
@@ -152,8 +183,9 @@ func rgb565(b []byte) image.Image {
 	return img
 }
 
-// make_super_moflex writes an episode's summary as `S1.E2 “Episode Title” - synopsis`.
-var reEpDesc = regexp.MustCompile(`^S(\d{1,2})\.E(\d{1,3})\s*(?:[“"](.*?)[”"])?\s*(?:-\s*)?`)
+// make_super_moflex writes an episode's summary as `S1.E2 “Episode Title” - synopsis`;
+// Moflex Studio writes `S01e02 “Episode Title” - synopsis`. Both are read.
+var reEpDesc = regexp.MustCompile(`^S(\d{1,2})(?:\.E|[eE])(\d{1,3})\s*(?:[“"](.*?)[”"])?\s*(?:-\s*)?`)
 
 // EpisodeFromDesc reads season, episode and episode title out of such a summary, and returns the
 // synopsis without that prefix. ok = the prefix was there.

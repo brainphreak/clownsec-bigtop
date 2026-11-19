@@ -131,9 +131,14 @@ Mark watched (`on=1`) or unwatched (`on=0`) for this client, clearing the resume
 
 ## Browser player endpoints
 
-### `GET /api/items/{id}/web?at=<ms>&audio=<n>&client=<id>`
-Start a browser stream of any item at `at` (exact: a moflex starts at the keyframe before it and
-drops the gap). Answers once the first segment exists (or `500` with FFmpeg's error), with:
+### `GET /api/items/{id}/web?at=<ms>&audio=<n>&src=<layout>&view=<view>&swap=1&client=<id>`
+Start a browser stream of any item. The playlist is the **whole film** as 2-second segments
+(segment k = [2k, 2k+2) s, a finished VOD playlist), so a player seeks anywhere by itself; Big Top
+makes a segment when it's asked for, starting FFmpeg there unless it's about to get there anyway
+(a moflex starts at the keyframe before and drops the gap). It answers once the segment holding
+`at` exists (or `500` with FFmpeg's error). `src` (`2d`/`hsbs`/`fsbs`) overrides the file's 3D
+layout; `view` (`anaglyph`/`fsbs`/`hsbs`/`2d`, with `swap=1`) has FFmpeg draw that 3D view into the
+picture -- for phones that can only show a plain video full screen. Answer:
 
 ```json
 {"url":"/api/web/<sid>/index.m3u8", "start":61000, "dur":5160353, "frame":"fsbs", "view":"3d",
@@ -141,7 +146,7 @@ drops the gap). Answers once the first segment exists (or `500` with FFmpeg's er
 ```
 
 `url` is an HLS playlist (H.264 + AAC, 2-second MPEG-TS segments; `EVENT` while it's being made)
-whose time 0 is `start` in the film. `frame` is the picture: `2d`, or both eyes side by side
+(`start` is always 0). `frame` is the picture: `2d`, or both eyes side by side
 (`fsbs`: each eye at full width — a 3D moflex comes as 800×240; `hsbs`: squeezed). `view` is the
 item's 3D label. One stream per `client`: a new one stops the one before.
 

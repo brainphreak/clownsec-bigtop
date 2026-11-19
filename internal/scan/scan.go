@@ -405,8 +405,17 @@ func (sc *Scanner) identify(it *library.Item) {
 	it.ShowDesc = showDesc
 	if sup != nil {
 		it.Audio, it.AltAudio, it.Subs = sup.AudioLang, sup.AltAudio, sup.SubLangs
+		it.AltAudios, it.Versions = sup.AltAudios, nil
+		if len(sup.Versions) > 0 {
+			main := sup.MainLabel
+			if main == "" {
+				main = "MAIN"
+			}
+			it.Versions = append([]string{main}, sup.Versions...)
+		}
 	} else {
 		it.Audio, it.AltAudio, it.Subs = "", "", nil
+		it.AltAudios, it.Versions = nil, nil
 	}
 	if pfile != "" {
 		it.Poster, it.PosterBy = pfile, pby

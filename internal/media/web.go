@@ -15,37 +15,84 @@ import (
 )
 
 // The browser player: any file becomes HLS (H.264 + AAC in 2-second MPEG-TS segments), which every
-// browser plays -- Safari itself, the others through hls.js. A 3D file keeps both eyes in one frame,
-// side by side; the page draws them as anaglyph, side-by-side or 2D.
+// browser plays -- through hls.js, or the browser's own HLS. A stream is the whole film, segment k
+// holding [2k, 2k+2) s; Big Top runs FFmpeg from whichever segment is wanted (WebJob.Seg), so a
+// seek anywhere -- the page's or a phone's own full-screen controls -- finds its piece.
+//
+// A 3D file keeps both eyes in one frame, side by side, for the page to draw (anaglyph, side by
+// side, 2D) -- or, for a phone that can only put a plain video full screen, FFmpeg draws the chosen
+// view into the picture itself (WebJob.View).
 
-// WebJob is one browser stream.
+// SegSec is a segment's length.
+const SegSec = 2
+
+// WebJob is one run of FFmpeg for a browser stream.
 type WebJob struct {
-	Path    string
-	StartMs int64 // where to start (exact: a moflex decodes from its keyframe and drops the gap)
+	Path string
+	Seg  int // the first segment to write (it starts at Seg*SegSec in the film)
 
-	// moflex: the file from byte In (a keyframe start, StartMs-GapMs), the frame rate per picture
+	// moflex: the file from byte In (a keyframe start, GapMs before the segment's time), the
+	// frame rate per picture
 	Moflex   bool
 	In       io.ReadSeeker
 	GapMs    int64
 	Stereo   bool // pairs of eye frames, interleaved: one side-by-side picture per pair
 	Num, Den int  // pictures per second = Num/Den
 
-	// anything else: what ffprobe found, the audio track (stream index, -1 = default) and the frame
-	// layout ("2d", "hsbs", "fsbs": side-by-side frames get more width)
-	Media  *library.Media
-	Audio  int
-	Layout string
+	// anything else: what ffprobe found and the audio track (stream index, -1 = default)
+	Media *library.Media
+	Audio int
+
+	// Frame is the picture's layout ("2d", or both eyes side by side: "hsbs", "fsbs"); View, when
+	// set, is drawn into the picture: "anaglyph", "fsbs", "hsbs" or "2d" (Swap: right eye first)
+	Frame string
+	View  string
+	Swap  bool
 
 	noReadrate bool // an FFmpeg older than 6.1 doesn't know -readrate_initial_burst
 }
 
-// WebArgs is the FFmpeg command line writing a job's HLS into dir.
+// StartMs is where in the film the job starts.
+func (j WebJob) StartMs() int64 { return int64(j.Seg) * SegSec * 1000 }
+
+// bake: the filters that draw a side-by-side picture as the chosen view (nil = leave it as it is).
+func bake(frame, view string, swap bool) []string {
+	if frame != "hsbs" && frame != "fsbs" || view == "" {
+		return nil
+	}
+	var f []string
+	if frame == "hsbs" {
+		f = append(f, "scale=w=iw*2:h=ih") // each eye back to its full width
+	}
+	in := "sbsl"
+	if swap {
+		in = "sbsr"
+	}
+	switch view {
+	case "anaglyph": // red/cyan, Dubois (as the page draws it)
+		f = append(f, "stereo3d=in="+in+":out=arcd")
+	case "2d":
+		f = append(f, "crop=w=iw/2:h=ih:x=0:y=0")
+	case "hsbs":
+		if swap {
+			f = append(f, "stereo3d=in=sbsr:out=sbsl")
+		}
+		f = append(f, "scale=w=iw/2:h=ih")
+	default: // fsbs
+		if swap {
+			f = append(f, "stereo3d=in=sbsr:out=sbsl")
+		}
+	}
+	return append(f, "scale=w='min(1920,iw)':h=-2", "setsar=1")
+}
+
+// WebArgs is the FFmpeg command line writing a job's segments into dir.
 func WebArgs(j WebJob, dir string) []string {
 	a := []string{"-hide_banner", "-nostdin", "-v", "error"}
 	if !j.noReadrate { // about real time once the first seconds are there: no converting a whole film ahead
-		a = append(a, "-readrate", "1.5", "-readrate_initial_burst", "20")
+		a = append(a, "-readrate", "1.5", "-readrate_initial_burst", "60")
 	}
-	var vf string
+	start := float64(j.StartMs()) / 1000
 	if j.Moflex {
 		num, den := j.Num, j.Den
 		if num <= 0 || den <= 0 {
@@ -55,24 +102,28 @@ func WebArgs(j WebJob, dir string) []string {
 		// FFmpeg times moflex video by counting frames at the declared rate, so the pictures are
 		// re-timed here; 3D: the even frames are the left eye, the odd ones the right
 		a = append(a, "-f", "moflex", "-i", "pipe:0")
+		var vf string
 		if j.Stereo {
 			vf = fmt.Sprintf("[0:v:0]split[a][b];[a]select='not(mod(n\\,2))',setpts=N/(%s)/TB[l];"+
-				"[b]select='mod(n\\,2)',setpts=N/(%s)/TB[r];[l][r]hstack=2,format=yuv420p[v]", r, r)
+				"[b]select='mod(n\\,2)',setpts=N/(%s)/TB[r];[l][r]hstack=2", r, r)
+			if b := bake("fsbs", j.View, j.Swap); b != nil {
+				vf += "," + strings.Join(b, ",")
+			}
 		} else {
-			vf = fmt.Sprintf("[0:v:0]setpts=N/(%s)/TB,format=yuv420p[v]", r)
+			vf = fmt.Sprintf("[0:v:0]setpts=N/(%s)/TB", r)
 		}
-		a = append(a, "-filter_complex", vf, "-map", "[v]", "-map", "0:a:0?", "-r", r)
+		a = append(a, "-filter_complex", vf+",format=yuv420p[v]", "-map", "[v]", "-map", "0:a:0?", "-r", r)
 		if j.GapMs > 0 {
 			a = append(a, "-ss", fmt.Sprintf("%.3f", float64(j.GapMs)/1000))
 		}
 	} else {
 		m := j.Media
-		if j.StartMs > 0 {
-			a = append(a, "-ss", fmt.Sprintf("%.3f", float64(j.StartMs)/1000))
+		if start > 0 {
+			a = append(a, "-ss", fmt.Sprintf("%.3f", start))
 		}
 		a = append(a, "-i", j.Path)
 		maxW := 1920
-		if j.Layout == "fsbs" {
+		if j.Frame == "fsbs" {
 			maxW = 2560 // two eyes of 1280
 		}
 		var chain []string
@@ -81,12 +132,13 @@ func WebArgs(j WebJob, dir string) []string {
 		}
 		// square pixels (a DVD's are not) -- except side-by-side, where the layout says how the
 		// eyes are packed whatever the file claims -- then at most maxW x 1080
-		if j.Layout != "hsbs" && j.Layout != "fsbs" {
+		if j.Frame != "hsbs" && j.Frame != "fsbs" {
 			chain = append(chain, "scale=w=trunc(iw*sar/2)*2:h=ih")
 		}
 		chain = append(chain, "setsar=1",
-			fmt.Sprintf("scale=w='min(%d,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2", maxW),
-			"format=yuv420p")
+			fmt.Sprintf("scale=w='min(%d,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2", maxW))
+		chain = append(chain, bake(j.Frame, j.View, j.Swap)...)
+		chain = append(chain, "format=yuv420p")
 		a = append(a, "-map", fmt.Sprintf("0:%d", m.Video), "-vf", strings.Join(chain, ","))
 		audio := j.Audio
 		if audio < 0 && len(m.Audio) > 0 {
@@ -102,16 +154,19 @@ func WebArgs(j WebJob, dir string) []string {
 			a = append(a, "-map", fmt.Sprintf("0:%d", audio))
 		}
 	}
+	// keyframes every SegSec from the job's start (a multiple of SegSec), so segment k always
+	// begins at k*SegSec; the timestamps carry on from where in the film the job starts
 	return append(a, "-sn", "-dn",
 		"-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-maxrate", "6M", "-bufsize", "12M",
-		"-profile:v", "high", "-pix_fmt", "yuv420p", "-force_key_frames", "expr:gte(t,n_forced*2)",
+		"-profile:v", "high", "-pix_fmt", "yuv420p", "-force_key_frames", fmt.Sprintf("expr:gte(t,n_forced*%d)", SegSec),
 		"-c:a", "aac", "-ac", "2", "-ar", "48000", "-b:a", "160k",
-		"-f", "hls", "-hls_time", "2", "-hls_list_size", "0", "-hls_playlist_type", "event",
+		"-output_ts_offset", fmt.Sprintf("%.3f", start),
+		"-f", "hls", "-hls_time", fmt.Sprint(SegSec), "-hls_list_size", "0", "-start_number", fmt.Sprint(j.Seg),
 		"-hls_flags", "independent_segments+temp_file", "-muxdelay", "0", "-muxpreload", "0",
-		"-hls_segment_filename", filepath.Join(dir, "s%05d.ts"), filepath.Join(dir, "index.m3u8"))
+		"-hls_segment_filename", filepath.Join(dir, "s%05d.ts"), filepath.Join(dir, "ffmpeg.m3u8"))
 }
 
-// WebTranscode runs a browser stream into dir until it ends or ctx is cancelled.
+// WebTranscode runs one job into dir until it ends or ctx is cancelled.
 func (t *Tool) WebTranscode(ctx context.Context, j WebJob, dir string) error {
 	ff, _ := t.Paths()
 	if ff == "" {

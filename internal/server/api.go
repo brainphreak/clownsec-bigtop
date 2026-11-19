@@ -88,8 +88,9 @@ type Entry struct {
 	Episodes int    `json:"episodes,omitempty"` // shows/seasons: how many
 	Seen     int    `json:"seen,omitempty"`     // ...and how many watched
 	Audio    string `json:"audio,omitempty"`
-	AltAudio string `json:"altAudio,omitempty"`
+	AltAudio string `json:"altAudio,omitempty"` // every trailer audio track's language, space-separated
 	Subs     string `json:"subs,omitempty"`
+	Versions string `json:"versions,omitempty"` // video versions ("COLOR, B&W"): the main one first
 	File     string `json:"file,omitempty"`
 	// not moflex: the 3DS plays /stream.ts (H.264 + AAC MPEG-TS, New 3DS) instead of /file
 	Stream      bool       `json:"stream,omitempty"`
@@ -163,6 +164,10 @@ func (s *Server) itemEntry(it *library.Item, client string, full bool) Entry {
 		e.Summary = clip(e.Summary, 400)
 	} else {
 		e.Audio, e.AltAudio, e.Subs, e.File = it.Audio, it.AltAudio, strings.Join(it.Subs, " "), filepath.Base(it.Path)
+		if len(it.AltAudios) > 0 { // a library scanned before multi-track files keeps only AltAudio
+			e.AltAudio = strings.Join(it.AltAudios, " ")
+		}
+		e.Versions = strings.Join(it.Versions, ", ")
 	}
 	if !library.IsMoflex(it.Path) {
 		e.Stream = true

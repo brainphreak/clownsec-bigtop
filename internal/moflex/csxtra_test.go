@@ -73,3 +73,35 @@ func TestEpisodeFromDesc(t *testing.T) {
 		t.Fatalf("plain: %v %q", ok, rest)
 	}
 }
+
+func TestReadSuperTracksAndVersions(t *testing.T) {
+	aud := func(lang string) []byte {
+		a := append([]byte{0x44, 0xAC, 0, 0, 2, 0, 0, 4}, []byte(lang+"\x00")...)
+		return append(a, make([]byte, 64)...)
+	}
+	vid := append([]byte("B&W\x00\x00\x00\x00\x00"), make([]byte, 200)...)
+	file := buildTrailer(make([]byte, 1000),
+		section("LNG0", []byte("ENG\x00")),
+		section("AUD1", aud("JPN")),
+		section("AUD1", aud("COM")),
+		section("AUD1", aud("SPA")),
+		section("VID1", vid),
+		section("VLB0", []byte("COLOR\x00\x00\x00")))
+	s, err := ReadSuper(bytes.NewReader(file), int64(len(file)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.AltAudio != "JPN" || len(s.AltAudios) != 3 || s.AltAudios[1] != "COM" || s.AltAudios[2] != "SPA" {
+		t.Fatalf("audio: %q %v", s.AltAudio, s.AltAudios)
+	}
+	if len(s.Versions) != 1 || s.Versions[0] != "B&W" || s.MainLabel != "COLOR" {
+		t.Fatalf("versions: %v %q", s.Versions, s.MainLabel)
+	}
+}
+
+func TestEpisodeFromDescStudio(t *testing.T) {
+	s, e, title, rest, ok := EpisodeFromDesc("S01e05 “War” - The war begins.")
+	if !ok || s != 1 || e != 5 || title != "War" || rest != "The war begins." {
+		t.Fatalf("got %d %d %q %q %v", s, e, title, rest, ok)
+	}
+}

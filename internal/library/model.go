@@ -99,18 +99,20 @@ type Item struct {
 	Added       int64  `json:"added"`
 	Checked3D   bool   `json:"c3d,omitempty"` // a moflex whose own frames were checked for 3D (once)
 
-	Detected Info     `json:"detected"`
-	Edit     Info     `json:"edit"`
-	Source   string   `json:"source"`            // where Detected came from: "super", "catalog", "filename"
-	Catalog  string   `json:"catalog,omitempty"` // matched Clownsec catalog entry id
-	Super    bool     `json:"super,omitempty"`
-	Audio    string   `json:"audio,omitempty"`    // in-band audio language ("ENG")
-	AltAudio string   `json:"altAudio,omitempty"` // the trailer's second audio track
-	Subs     []string `json:"subs,omitempty"`     // trailer subtitle languages
-	ShowDesc string   `json:"showDesc,omitempty"` // a super moflex episode: its show's description
-	Poster   string   `json:"poster,omitempty"`   // file in the posters folder
-	PosterBy string   `json:"posterBy,omitempty"` // "super", "catalog", "user"
-	Media    *Media   `json:"media,omitempty"`    // not moflex: what ffprobe found (nil = not probed yet)
+	Detected  Info     `json:"detected"`
+	Edit      Info     `json:"edit"`
+	Source    string   `json:"source"`            // where Detected came from: "super", "catalog", "filename"
+	Catalog   string   `json:"catalog,omitempty"` // matched Clownsec catalog entry id
+	Super     bool     `json:"super,omitempty"`
+	Audio     string   `json:"audio,omitempty"`     // in-band audio language ("ENG")
+	AltAudio  string   `json:"altAudio,omitempty"`  // the trailer's second audio track
+	AltAudios []string `json:"altAudios,omitempty"` // every trailer audio track (2, 3, ...)
+	Versions  []string `json:"versions,omitempty"`  // video versions: the main one's label first, then the alternates
+	Subs      []string `json:"subs,omitempty"`      // trailer subtitle languages
+	ShowDesc  string   `json:"showDesc,omitempty"`  // a super moflex episode: its show's description
+	Poster    string   `json:"poster,omitempty"`    // file in the posters folder
+	PosterBy  string   `json:"posterBy,omitempty"`  // "super", "catalog", "user"
+	Media     *Media   `json:"media,omitempty"`     // not moflex: what ffprobe found (nil = not probed yet)
 }
 
 // Media is a non-moflex file's streams, as ffprobe reports them. Big Top transcodes these to the
