@@ -214,12 +214,11 @@ func (s *Server) apiLibraries(w http.ResponseWriter, r *http.Request) {
 		Shows  int    `json:"shows"`
 	}
 	out := []L{}
-	hide := s.shadowed()
 	for _, l := range s.Store.DB.Libraries {
 		x := L{ID: l.ID, Name: l.Name}
 		shows := map[string]bool{}
 		for _, it := range s.Store.DB.Items {
-			if it.Lib != l.ID || it.Missing != 0 || hide[it.ID] {
+			if it.Lib != l.ID || it.Missing != 0 {
 				continue
 			}
 			if it.IsEpisode() {
@@ -262,9 +261,8 @@ func (s *Server) apiLibrary(w http.ResponseWriter, r *http.Request) {
 	}
 	var list []Entry
 	shows := map[string]*Entry{}
-	hide := s.shadowed()
 	for _, it := range s.Store.DB.Items {
-		if it.Lib != id || it.Missing != 0 || hide[it.ID] {
+		if it.Lib != id || it.Missing != 0 {
 			continue
 		}
 		if !it.IsEpisode() {
@@ -311,9 +309,8 @@ func (s *Server) showEntry(sid, fallbackTitle string) *Entry {
 
 func (s *Server) episodes(sid, client string) []*library.Item {
 	var eps []*library.Item
-	hide := s.shadowed()
 	for _, it := range s.Store.DB.Items {
-		if it.Missing == 0 && !hide[it.ID] && it.IsEpisode() && library.ShowID(it.Lib, it.Info().Show) == sid {
+		if it.Missing == 0 && it.IsEpisode() && library.ShowID(it.Lib, it.Info().Show) == sid {
 			eps = append(eps, it)
 		}
 	}

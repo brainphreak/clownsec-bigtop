@@ -340,39 +340,3 @@ func (s *Server) prefetchSubs(id string) {
 }
 
 func isFile(p string) bool { st, err := os.Stat(p); return err == nil && !st.IsDir() }
-
-// ---- the same video twice ----
-
-// shadowed lists the non-moflex items that have a moflex of the same movie or episode in the
-// same library: the converted copy is what a 3DS plays best, so only it is listed. (Converters
-// leave their moflex beside the source -- "Show 1-01.avi" + "Show 1-01 ... .moflex".)
-// Caller holds a read lock.
-func (s *Server) shadowed() map[string]bool {
-	key := func(it *library.Item) string {
-		in := it.Info()
-		if it.IsEpisode() {
-			return it.Lib + "|e|" + library.Norm(in.Show) + "|" + strconv.Itoa(in.Season) + "|" + strconv.Itoa(in.Episode)
-		}
-		if in.Title == "" {
-			return ""
-		}
-		return it.Lib + "|m|" + library.Norm(in.Title) + "|" + strconv.Itoa(in.Year)
-	}
-	mof := map[string]bool{}
-	for _, it := range s.Store.DB.Items {
-		if it.Missing == 0 && library.IsMoflex(it.Path) {
-			if k := key(it); k != "" {
-				mof[k] = true
-			}
-		}
-	}
-	hide := map[string]bool{}
-	for _, it := range s.Store.DB.Items {
-		if it.Missing == 0 && !library.IsMoflex(it.Path) {
-			if k := key(it); k != "" && mof[k] {
-				hide[it.ID] = true
-			}
-		}
-	}
-	return hide
-}
