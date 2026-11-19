@@ -53,6 +53,10 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("GET /api/items/{id}/subs/{n}", s.apiSubFile)
 	m.HandleFunc("POST /api/items/{id}/progress", s.apiProgress)
 	m.HandleFunc("POST /api/items/{id}/watched", s.apiWatched)
+	// the browser player
+	m.HandleFunc("GET /api/items/{id}/web", s.apiWeb)
+	m.HandleFunc("GET /api/web/{sid}/{name}", s.apiWebFile)
+	m.HandleFunc("POST /api/web/{sid}/stop", s.apiWebStop)
 	// ---- the setup page ----
 	s.adminRoutes(m)
 	return logRequests(m)

@@ -59,7 +59,9 @@ dialog::backdrop { background: #000b; }
 .edit .art { aspect-ratio: 175 / 250; border-radius: 8px; background: var(--panel2) center/cover no-repeat; border: 1px solid var(--line); }
 .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; flex-wrap: wrap; }
 .hint { font-size: 12px; color: var(--dim); }
-[hidden] { display: none !important; }   /* an inline display:flex would beat the hidden attribute */
+[hidden] { display: none !important; }
+/* another device without "allow remote admin": browse and watch only */
+body.viewer .admin { display: none !important; }   /* an inline display:flex would beat the hidden attribute */
 .picker { max-height: 340px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; margin-top: 8px; }
 .picker div { padding: 8px 10px; border-bottom: 1px solid var(--line); cursor: pointer; display: flex; gap: 10px; align-items: center; }
 .picker div:hover { background: var(--panel2); }
@@ -105,27 +107,60 @@ dialog::backdrop { background: #000b; }
 .seasons { margin-top: 12px; }
 .seasons h4 { margin: 14px 0 4px; font-size: 13px; color: var(--dim); text-transform: uppercase; letter-spacing: .6px; }
 @media (max-width: 640px) { .detail { grid-template-columns: 110px 1fr; gap: 14px; } .detail h3 { font-size: 18px; } }
+.ep .play { flex: none; }
+/* the player */
+#player { position: fixed; inset: 0; z-index: 1000; background: #000; color: #fff; user-select: none; -webkit-user-select: none; touch-action: manipulation; }
+#pstage { position: absolute; inset: 0; display: grid; place-items: center; overflow: hidden; }
+#pvid, #pcan { grid-area: 1 / 1; max-width: 100%; max-height: 100%; }
+#pvid { width: 100%; height: 100%; object-fit: contain; background: #000; }
+#pvid.under { opacity: 0; pointer-events: none; }
+#pcan { display: block; }
+.pui { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: space-between; transition: opacity .25s; }
+#player.idle .pui { opacity: 0; cursor: none; }
+.ptop { display: flex; gap: 10px; align-items: center; padding: max(12px, env(safe-area-inset-top)) 16px 30px; background: linear-gradient(#000c, #0000); }
+.ptop .ttl { font-weight: 700; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.pbot { padding: 30px 16px max(12px, env(safe-area-inset-bottom)); background: linear-gradient(#0000, #000d); }
+.pbtn { background: #fff1; border: 1px solid #fff3; color: #fff; border-radius: 8px; padding: 6px 11px; font-size: 14px; min-width: 40px; }
+.pbtn:hover { background: #fff2; border-color: #fff6; }
+.pbtn.on { background: var(--accent); border-color: var(--accent); }
+.prow { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.ptime { font-size: 13px; font-variant-numeric: tabular-nums; color: #ddd; white-space: nowrap; }
+#pseek { width: 100%; accent-color: var(--accent); padding: 0; border: 0; background: none; height: 22px; }
+#pvol { width: 90px; accent-color: var(--accent); padding: 0; border: 0; background: none; }
+.pcenter { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
+.pspin { width: 46px; height: 46px; border: 4px solid #fff3; border-top-color: #fff; border-radius: 50%; animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.pmsg { background: #000c; padding: 12px 16px; border-radius: 10px; max-width: min(520px, 90vw); text-align: center; pointer-events: auto; }
+.pmenu { position: absolute; right: 16px; bottom: 86px; background: #16121ef2; border: 1px solid #fff2; border-radius: 12px; padding: 10px 12px; width: min(300px, calc(100vw - 32px)); max-height: 70vh; overflow: auto; }
+.pmenu h5 { margin: 8px 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: #aaa; }
+.pmenu button { display: block; width: 100%; text-align: left; background: none; border: 0; color: #fff; padding: 7px 8px; border-radius: 6px; font-size: 14px; }
+.pmenu button:hover { background: #fff1; }
+.pmenu button.on { background: var(--accent); }
+.pmenu button:disabled { opacity: .4; }
+.pmenu .hint { color: #aaa; padding: 4px 8px; }
+@media (max-width: 640px) { #pvol { display: none; } .pbtn { padding: 6px 9px; min-width: 36px; } .hide-sm { display: none; } }
+@media (hover: none) { #pvol { display: none; } }
 </style>
 </head>
 <body>
 <header>
   <div class="logo"><b>Clownsec</b> <i>Big Top</i></div>
   <span class="pill" id="srvname">…</span>
-  <span class="pill" id="addr"></span>
+  <span class="pill admin" id="addr"></span>
   <div class="grow"></div>
-  <span class="status" id="scanline"></span>
-  <button id="scanbtn">Scan for new videos</button>
-  <button id="setbtn">Settings</button>
-  <button id="quitbtn" title="Stop Big Top">Quit</button>
+  <span class="status admin" id="scanline"></span>
+  <button id="scanbtn" class="admin">Scan for new videos</button>
+  <button id="setbtn" class="admin">Settings</button>
+  <button id="quitbtn" class="admin" title="Stop Big Top">Quit</button>
 </header>
-<div id="updbar" hidden style="background:var(--panel2);border-bottom:1px solid var(--line);padding:10px 22px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+<div id="updbar" class="admin" hidden style="background:var(--panel2);border-bottom:1px solid var(--line);padding:10px 22px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
   <span id="updtext"></span>
   <div id="updprog" class="bar" hidden style="width:180px;margin:0"><div></div></div>
   <div class="grow"></div>
   <a id="updnotes" href="#" style="color:var(--accent2)">What's new</a>
   <button class="primary" id="updbtn">Update now</button>
 </div>
-<div id="ffbar" hidden style="background:var(--panel2);border-bottom:1px solid var(--line);padding:10px 22px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+<div id="ffbar" class="admin" hidden style="background:var(--panel2);border-bottom:1px solid var(--line);padding:10px 22px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
   <span id="fftext"></span>
   <div id="ffprog" class="bar" hidden style="width:180px;margin:0"><div></div></div>
   <div class="grow"></div>
@@ -134,9 +169,11 @@ dialog::backdrop { background: #000b; }
 <main>
   <div class="bar" id="scanbar" hidden><div></div></div>
 
+  <div class="admin">
   <h2>Libraries</h2>
   <div class="libs" id="libs"></div>
   <p><button class="primary" id="addlib">+ Add a library</button></p>
+  </div>
 
   <h2>Browse</h2>
   <div class="tabs" id="tabs"></div>
@@ -162,6 +199,30 @@ dialog::backdrop { background: #000b; }
 
 <dialog id="dlg"><div class="dlg" id="dlgbody"></div></dialog>
 
+<div id="player" hidden>
+  <div id="pstage"><video id="pvid" playsinline webkit-playsinline preload="auto"></video><canvas id="pcan" hidden></canvas></div>
+  <div class="pcenter"><div class="pspin" id="pspin" hidden></div></div>
+  <div class="pcenter"><div class="pmsg" id="pmsg" hidden></div></div>
+  <div class="pui" id="pui">
+    <div class="ptop"><button class="pbtn" id="pclose" title="Close (Esc)">✕</button><span class="ttl" id="ptitle"></span></div>
+    <div class="pbot">
+      <input type="range" id="pseek" min="0" max="1000" value="0" step="1">
+      <div class="prow">
+        <button class="pbtn" id="pplay" title="Play / pause (space)">▶</button>
+        <button class="pbtn hide-sm" id="pback" title="Back 10 s (←)">−10</button>
+        <button class="pbtn hide-sm" id="pfwd" title="Forward 10 s (→)">+10</button>
+        <span class="ptime" id="ptime">0:00</span>
+        <span class="grow"></span>
+        <input type="range" id="pvol" min="0" max="1" step="0.05" value="1" title="Volume">
+        <button class="pbtn" id="paud" hidden title="Audio track">Audio</button>
+        <button class="pbtn" id="p3d" title="3D view">3D</button>
+        <button class="pbtn" id="pfs" title="Full screen (f)">⛶</button>
+      </div>
+    </div>
+  </div>
+  <div class="pmenu" id="pmenu" hidden></div>
+</div>
+
 <script>
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -182,6 +243,7 @@ let state = null, curLib = null, libData = { items: [], shows: [] }, bust = Date
 
 async function loadState() {
   state = await api('GET', '/admin/api/state');
+  document.body.classList.toggle('viewer', !!state.viewer);
   $('#srvname').textContent = state.name;
   $('#addr').textContent = (state.addresses || []).join('  ·  ') || 'no network address';
   $('#addr').title = 'If the 3DS does not find this server by itself, enter one of these addresses';
@@ -378,7 +440,7 @@ function renderGrid() {
   if (!shown.length) { $('#grid').innerHTML = `<div class="empty">${!curLib ? '' : all.length ? 'Nothing matches these filters.' : 'Nothing here yet.'}</div>`; return; }
   $('#grid').innerHTML = shown.map(t => {
     const url = t.kind === 'tvshow' ? `/api/shows/${t.id}/poster?w=280&h=400&v=${bust}` : `/api/items/${t.id}/poster?w=280&h=400&v=${bust}`;
-    const tag = t.sup ? '<span class="badge r bsup">SUPER</span>' : t.src === 'filename' ? '<span class="badge r bfn" title="Only the file name was recognised">CHECK</span>' : '';
+    const tag = t.sup ? '<span class="badge r bsup">SUPER</span>' : t.src === 'filename' && !state.viewer ? '<span class="badge r bfn" title="Only the file name was recognised">CHECK</span>' : '';
     const sub = t.kind === 'tvshow' ? `${t.eps} episode${t.eps === 1 ? '' : 's'}` : (t.year || '');
     return `<div class="tile" data-kind="${t.kind === 'tvshow' ? 'show' : 'item'}" data-id="${t.id}" tabindex="0">
       <div class="art">${t.poster ? `<img src="${url}" alt="" loading="lazy" decoding="async">` : `<div class="none">${esc(t.title)}</div>`}
@@ -430,9 +492,25 @@ function itemDetail(id) {
         <div class="path">${esc(it.path)}</div>
       </div>
     </div>
-    <div class="actions"><button id="dclose" style="margin-right:auto">Close</button><button id="dedit">Edit info</button></div>`);
+    <div class="actions"><button id="dclose" style="margin-right:auto">Close</button><button id="dedit" class="admin">Edit info</button>
+      <span id="dwatch"></span></div>`);
   $('#dclose').onclick = close;
   $('#dedit').onclick = () => itemDialog(id);
+  watchButtons(id, $('#dwatch'));
+}
+
+// Watch / Resume for one item: resume when this browser stopped part-way
+async function watchButtons(id, box) {
+  if (!state.ffmpeg || !state.ffmpeg.found) {
+    box.innerHTML = '<span class="hint">Watching in the browser needs FFmpeg (see Settings).</span>'; return;
+  }
+  box.innerHTML = '<button class="primary" data-w="0">▶ Watch</button>';
+  try {
+    const e = await api('GET', `/api/items/${id}?client=${encodeURIComponent(webClient)}`);
+    if (e && e.pos > 30000 && (!e.dur || e.pos < e.dur - 60000))
+      box.innerHTML = `<button data-w="0">From the start</button> <button class="primary" data-w="${e.pos}">▶ Resume ${fmtTime(e.pos)}</button>`;
+  } catch {}
+  box.querySelectorAll('[data-w]').forEach(b => b.onclick = () => { close(); watch(id, +b.dataset.w); });
 }
 
 function showDetail(sid) {
@@ -454,11 +532,13 @@ function showDetail(sid) {
     </div>
     <div class="seasons">${seasons.map(n => `<h4>Season ${n}</h4>` + eps.filter(e => e.info.season === n).map(x =>
       `<div class="ep"><span class="n">E${x.info.episode}</span><span class="x">${esc(x.info.epTitle || x.info.title || '')}</span>
-        ${x.fmt ? `<span class="hint">${esc(x.fmt)}</span>` : ''}<button class="small" data-epd="${x.id}">Details</button></div>`).join('')).join('')}</div>
-    <div class="actions"><button id="dclose" style="margin-right:auto">Close</button><button id="dedit">Edit show</button></div>`);
+        ${x.fmt ? `<span class="hint">${esc(x.fmt)}</span>` : ''}<button class="small" data-epd="${x.id}">Details</button>
+        <button class="small primary play" data-epw="${x.id}" title="Watch">▶</button></div>`).join('')).join('')}</div>
+    <div class="actions"><button id="dclose" style="margin-right:auto">Close</button><button id="dedit" class="admin">Edit show</button></div>`);
   $('#dclose').onclick = close;
   $('#dedit').onclick = () => showDialog(sid);
   document.querySelectorAll('[data-epd]').forEach(b => b.onclick = () => itemDetail(b.dataset.epd));
+  document.querySelectorAll('[data-epw]').forEach(b => b.onclick = () => { close(); watch(b.dataset.epw, -1); });
 }
 
 // ---------- dialogs ----------
@@ -724,6 +804,292 @@ $('#quitbtn').onclick = async () => {
   document.body.innerHTML = '<main><h2>Big Top has stopped.</h2><p class="hint">Start it again to keep watching.</p></main>';
 };
 $('#scanbtn').onclick = async () => { await api('POST', '/admin/api/scan'); poll(); };
+
+// ---------- the player ----------
+// Big Top converts the file to HLS (H.264 + AAC) from the time asked; a seek outside what's loaded
+// asks again from there. 3D comes as both eyes side by side in one frame, drawn here with WebGL as
+// anaglyph (red/cyan), full or half side-by-side for 3D screens, or 2D (the left eye).
+const webClient = (() => {
+  try { let c = localStorage.getItem('bt.client'); if (!c) { c = 'web-' + Math.random().toString(36).slice(2, 10); localStorage.setItem('bt.client', c); } return c; }
+  catch { return 'web'; }
+})();
+const lsGet = (k, d) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } };
+const lsSet = (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch {} };
+const fmtTime = ms => { const t = Math.max(0, Math.floor(ms / 1000)), h = Math.floor(t / 3600), m = Math.floor(t / 60) % 60, x = String(t % 60).padStart(2, '0');
+  return h ? `${h}:${String(m).padStart(2, '0')}:${x}` : `${m}:${x}`; };
+const P = { id: null, sess: null, hls: null, base: 0, gen: 0, dragging: false, ended: false, gl: null, raf: 0, idleT: 0, progT: 0, lastSaved: 0, audioN: -1 };
+const pv = $('#pvid'), pc = $('#pcan');
+const VIEWS = { anaglyph: 'Anaglyph (red / cyan glasses)', fsbs: 'Side by side — full', hsbs: 'Side by side — half', '2d': '2D' };
+const SRCS = { '2d': '2D', hsbs: '3D Half SBS', fsbs: '3D Full SBS' };
+
+let hlsLoad;
+function needHls() {
+  // hls.js wherever the browser has Media Source (iPhones too, since iOS 17.1); else the browser's own
+  // HLS (older iPhones). Not the other way round: some browsers claim HLS and then can't play it.
+  if (!window.MediaSource && !window.ManagedMediaSource) return Promise.resolve(null);
+  return hlsLoad ||= new Promise((ok, no) => { const sc = document.createElement('script'); sc.src = '/hls.min.js';
+    sc.onload = () => ok(window.Hls); sc.onerror = () => no(new Error('could not load the player')); document.head.appendChild(sc); });
+}
+
+function srcLayout() { return lsGet('bt.src.' + P.id, '') || (P.sess && P.sess.frame) || '2d'; }
+function viewMode() { return srcLayout() === '2d' ? '2d' : lsGet('bt.view', 'anaglyph'); }
+const now = () => P.sess ? P.sess.start + Math.max(0, pv.currentTime - P.base) * 1000 : 0;
+
+async function watch(id, at) {
+  const it = libData.items.find(x => x.id === id);
+  P.id = id; P.ended = false; P.audioN = -1;
+  $('#player').hidden = false; document.body.style.overflow = 'hidden';
+  $('#ptitle').textContent = it ? (it.showId ? `${it.info.show} · S${it.info.season}E${it.info.episode} ${it.info.epTitle || ''}` : it.info.title) : '';
+  pv.volume = +lsGet('bt.vol', 1); $('#pvol').value = pv.volume;
+  if (at < 0) { // resume if this browser stopped part-way
+    at = 0;
+    try { const e = await api('GET', `/api/items/${id}?client=${encodeURIComponent(webClient)}`); if (e && e.pos > 30000) at = e.pos; } catch {}
+  }
+  showUI(); start(at);
+}
+
+async function start(at) {
+  const gen = ++P.gen;
+  msg(''); spin(true);
+  stopStream(true);
+  let s;
+  try {
+    const q = new URLSearchParams({ at: Math.round(at), client: webClient });
+    if (P.audioN >= 0) q.set('audio', P.audioN);
+    s = await api('GET', `/api/items/${P.id}/web?${q}`);
+  } catch (x) { if (gen === P.gen) { spin(false); msg(esc(x.message)); } return; }
+  if (gen !== P.gen) { fetch(s.url.replace('index.m3u8', 'stop'), { method: 'POST' }); return; }
+  P.sess = s; P.base = 0;
+  $('#paud').hidden = !(s.audio && s.audio.length > 1);
+  let Hls;
+  try { Hls = await needHls(); } catch (x) { spin(false); msg(esc(x.message)); return; }
+  if (gen !== P.gen) return;
+  if (Hls && Hls.isSupported()) {
+    const h = new Hls({ startPosition: 0, maxBufferLength: 30, backBufferLength: 60, liveSyncDurationCount: 3, liveMaxLatencyDurationCount: Infinity });
+    P.hls = h; P.native = false;
+    if (!window.MediaSource) pv.disableRemotePlayback = true; // iPhone's Managed Media Source requires it
+    h.on(Hls.Events.ERROR, (_, d) => { if (d.fatal) console.warn('player:', d.type, d.details, d.response ? d.response.code : ''); if (d.fatal && gen === P.gen) recover(); });
+    h.loadSource(s.url); h.attachMedia(pv);
+  } else if (pv.canPlayType('application/vnd.apple.mpegurl')) {
+    P.native = true; pv.src = s.url;
+  } else { spin(false); msg('This browser can\'t play the stream.'); return; }
+  pv.play().catch(() => {});
+  setupRender();
+}
+
+// the stream broke (Big Top restarted, a long pause outlived it): start again where we were
+let recovering = 0;
+function recover() {
+  if (Date.now() - recovering < 4000) { spin(false); msg('The stream stopped. <button class="pbtn" onclick="start(now())">Try again</button>'); return; }
+  recovering = Date.now(); start(now());
+}
+
+function stopStream(keepUI) {
+  if (P.hls) { P.hls.destroy(); P.hls = null; }
+  if (P.sess) { const u = P.sess.url.replace('index.m3u8', 'stop'); navigator.sendBeacon ? navigator.sendBeacon(u) : fetch(u, { method: 'POST' }); }
+  pv.removeAttribute('src'); pv.load();
+  P.sess = null;
+}
+
+function closePlayer() {
+  saveProgress(true);
+  P.gen++; stopStream();
+  cancelAnimationFrame(P.raf);
+  $('#player').hidden = true; $('#pmenu').hidden = true; document.body.style.overflow = '';
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  P.id = null;
+}
+
+function seekTo(ms) {
+  if (!P.sess) return;
+  const d = P.sess.dur || Infinity;
+  ms = Math.max(0, Math.min(ms, d - 1000));
+  // inside what's loaded: just move there; else a new stream from that time
+  const t = P.base + (ms - P.sess.start) / 1000, b = pv.buffered;
+  for (let i = 0; i < b.length; i++) if (t >= b.start(i) && t <= b.end(i) - 0.5) { pv.currentTime = t; return; }
+  start(ms);
+}
+
+function saveProgress(stopped) {
+  if (!P.id || !P.sess) return;
+  const pos = Math.round(now()), dur = P.sess.dur || 0;
+  if (!stopped && Math.abs(pos - P.lastSaved) < 5000) return;
+  P.lastSaved = pos;
+  const q = new URLSearchParams({ pos: P.ended ? dur : pos, dur, state: stopped ? 'stopped' : 'playing', client: webClient });
+  const u = `/api/items/${P.id}/progress?${q}`;
+  stopped && navigator.sendBeacon ? navigator.sendBeacon(u) : fetch(u, { method: 'POST' }).catch(() => {});
+}
+
+const spin = on => { $('#pspin').hidden = !on; };
+const msg = h => { $('#pmsg').innerHTML = h; $('#pmsg').hidden = !h; };
+
+// ----- drawing: the <video> itself for 2D, WebGL for the 3D views
+const FS = `precision mediump float;
+varying vec2 uv; uniform sampler2D tex; uniform int mode; uniform int sbs; uniform int swap;
+vec3 eye(int right, vec2 p) {
+  if (sbs == 0) return texture2D(tex, p).rgb;
+  int r = swap == 1 ? 1 - right : right;
+  return texture2D(tex, vec2((p.x + float(r)) * 0.5, p.y)).rgb;
+}
+void main() {
+  vec3 c;
+  if (mode == 1) {        // anaglyph, red/cyan (Dubois: truer colour, less ghosting than plain channel mixing)
+    vec3 l = eye(0, uv), r = eye(1, uv);
+    c = clamp(mat3(0.437, -0.062, -0.048, 0.449, -0.062, -0.050, 0.164, -0.024, -0.017) * l +
+              mat3(-0.011, 0.377, -0.026, -0.032, 0.761, -0.093, -0.007, 0.009, 1.234) * r, 0.0, 1.0);
+  } else if (mode == 2) { // side by side: left eye in the left half
+    c = uv.x < 0.5 ? eye(0, vec2(uv.x * 2.0, uv.y)) : eye(1, vec2(uv.x * 2.0 - 1.0, uv.y));
+  } else {                // 2D: the left eye
+    c = eye(0, uv);
+  }
+  gl_FragColor = vec4(c, 1.0);
+}`;
+function glInit() {
+  const gl = pc.getContext('webgl', { alpha: false, antialias: false, preserveDrawingBuffer: false });
+  if (!gl) return null;
+  const sh = (t, src) => { const x = gl.createShader(t); gl.shaderSource(x, src); gl.compileShader(x); return x; };
+  const pr = gl.createProgram();
+  gl.attachShader(pr, sh(gl.VERTEX_SHADER, 'attribute vec2 p; varying vec2 uv; void main(){ uv = vec2(p.x*0.5+0.5, 0.5-p.y*0.5); gl_Position = vec4(p,0.0,1.0); }'));
+  gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, FS));
+  gl.linkProgram(pr); gl.useProgram(pr);
+  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+  const loc = gl.getAttribLocation(pr, 'p'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
+  for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]])
+    gl.texParameteri(gl.TEXTURE_2D, k, v);
+  return { gl, u: n => gl.getUniformLocation(pr, n) };
+}
+
+function setupRender() {
+  const src = srcLayout(), view = viewMode();
+  const canvas = view !== '2d' || src !== '2d';
+  pc.hidden = !canvas; pv.classList.toggle('under', canvas);
+  $('#p3d').classList.toggle('on', view !== '2d');
+  cancelAnimationFrame(P.raf);
+  if (!canvas) return;
+  if (!P.gl && !(P.gl = glInit())) { pc.hidden = true; pv.classList.remove('under'); msg('3D needs WebGL, which this browser doesn\'t have.'); return; }
+  const { gl, u } = P.gl;
+  const draw = () => {
+    P.raf = requestAnimationFrame(draw);
+    const W = pv.videoWidth, H = pv.videoHeight;
+    if (!W || pv.readyState < 2) return;
+    // the shape of what's shown: one eye, or two side by side
+    const eyeAR = src === '2d' ? W / H : src === 'hsbs' ? W / H : W / 2 / H;
+    const ar = view === 'fsbs' ? eyeAR * 2 : eyeAR;
+    const st = $('#pstage'), sw = st.clientWidth, sh = st.clientHeight;
+    let cw = sw, ch = sw / ar; if (ch > sh) { ch = sh; cw = sh * ar; }
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const pw = Math.round(cw * dpr), ph = Math.round(ch * dpr);
+    if (pc.width !== pw || pc.height !== ph) { pc.width = pw; pc.height = ph; }
+    pc.style.width = cw + 'px'; pc.style.height = ch + 'px';
+    gl.viewport(0, 0, pw, ph);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, pv);
+    gl.uniform1i(u('mode'), view === 'anaglyph' ? 1 : view === '2d' ? 0 : 2);
+    gl.uniform1i(u('sbs'), src === '2d' ? 0 : 1);
+    gl.uniform1i(u('swap'), lsGet('bt.swap', '0') === '1' ? 1 : 0);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  };
+  draw();
+}
+
+// ----- controls
+function showUI() {
+  $('#player').classList.remove('idle');
+  clearTimeout(P.idleT);
+  P.idleT = setTimeout(() => { if (!pv.paused && $('#pmenu').hidden && !P.dragging) $('#player').classList.add('idle'); }, 3000);
+}
+function tick() {
+  if (!P.sess) return;
+  const d = P.sess.dur, t = now();
+  if (!P.dragging) { $('#pseek').max = d || 1; $('#pseek').value = t; }
+  $('#ptime').textContent = d ? `${fmtTime(P.dragging ? +$('#pseek').value : t)} / ${fmtTime(d)}` : fmtTime(t);
+}
+pv.addEventListener('loadeddata', () => { const b = pv.buffered; P.base = b.length ? b.start(0) : 0; if (pv.currentTime < P.base) pv.currentTime = P.base; });
+pv.addEventListener('playing', () => { spin(false); msg(''); $('#pplay').textContent = '❚❚'; showUI(); });
+pv.addEventListener('pause', () => { $('#pplay').textContent = '▶'; showUI(); saveProgress(false); });
+pv.addEventListener('waiting', () => spin(true));
+pv.addEventListener('timeupdate', () => { tick(); saveProgress(false); });
+// Safari's own HLS reports a broken stream here (hls.js reports through its own events); clearing
+// the old source also fires this, with no source set
+pv.addEventListener('error', () => { if (P.sess && P.native && pv.getAttribute('src')) recover(); });
+pv.addEventListener('ended', () => { P.ended = true; saveProgress(true); nextEpisode(); });
+
+function nextEpisode() {
+  const it = libData.items.find(x => x.id === P.id);
+  if (!it || !it.showId) return;
+  const eps = libData.items.filter(i => i.showId === it.showId && !i.missing)
+    .sort((a, b) => (a.info.season - b.info.season) || (a.info.episode - b.info.episode));
+  const nx = eps[eps.findIndex(e => e.id === it.id) + 1];
+  if (!nx) return;
+  let n = 8;
+  const show = () => msg(`Next: S${nx.info.season}E${nx.info.episode} ${esc(nx.info.epTitle || '')} in ${n} s<br><br>
+    <button class="pbtn" id="pnext">Play now</button> <button class="pbtn" id="pstay">Cancel</button>`);
+  show();
+  const t = setInterval(() => { if (--n <= 0) go(); else show(), bind(); }, 1000);
+  const go = () => { clearInterval(t); watch(nx.id, 0); };
+  const bind = () => { $('#pnext').onclick = go; $('#pstay').onclick = () => { clearInterval(t); msg(''); }; };
+  bind();
+}
+
+$('#pplay').onclick = () => pv.paused ? pv.play() : pv.pause();
+$('#pback').onclick = () => seekTo(now() - 10000);
+$('#pfwd').onclick = () => seekTo(now() + 10000);
+$('#pclose').onclick = closePlayer;
+$('#pseek').addEventListener('input', () => { P.dragging = true; tick(); showUI(); });
+$('#pseek').addEventListener('change', () => { P.dragging = false; seekTo(+$('#pseek').value); });
+$('#pvol').oninput = () => { pv.volume = +$('#pvol').value; pv.muted = false; lsSet('bt.vol', pv.volume); };
+$('#pfs').onclick = () => {
+  const el = $('#player');
+  if (document.fullscreenElement || document.webkitFullscreenElement) { (document.exitFullscreen || document.webkitExitFullscreen).call(document); return; }
+  const req = el.requestFullscreen || el.webkitRequestFullscreen;
+  if (req) Promise.resolve(req.call(el)).then(() => screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape').catch(() => {})).catch(() => {});
+  else if (pc.hidden && pv.webkitEnterFullscreen) pv.webkitEnterFullscreen(); // iPhone: only a plain video can
+};
+$('#pstage').addEventListener('click', () => { if (!$('#pmenu').hidden) { $('#pmenu').hidden = true; return; } if (matchMedia('(hover: hover)').matches) pv.paused ? pv.play() : pv.pause(); showUI(); });
+$('#player').addEventListener('mousemove', showUI);
+$('#player').addEventListener('touchstart', showUI, { passive: true });
+document.addEventListener('keydown', ev => {
+  if ($('#player').hidden || ev.target.matches('input[type=text], input[type=search], textarea')) return;
+  const k = ev.key;
+  if (k === ' ' || k === 'k') { ev.preventDefault(); pv.paused ? pv.play() : pv.pause(); }
+  else if (k === 'ArrowLeft') seekTo(now() - 10000);
+  else if (k === 'ArrowRight') seekTo(now() + 10000);
+  else if (k === 'f') $('#pfs').click();
+  else if (k === 'Escape' && !document.fullscreenElement) closePlayer();
+  else return;
+  showUI();
+});
+
+function menu3d() {
+  const src = srcLayout(), view = viewMode(), det = (P.sess && P.sess.frame) || '2d', own = lsGet('bt.src.' + P.id, '');
+  const m = $('#pmenu');
+  m.innerHTML = `<h5>View</h5>${Object.entries(VIEWS).map(([k, l]) => `<button data-v="${k}" class="${view === k ? 'on' : ''}" ${src === '2d' && k !== '2d' ? 'disabled' : ''}>${l}</button>`).join('')}
+    <label style="display:flex;gap:8px;align-items:center;color:#fff;font-size:14px;padding:6px 8px"><input type="checkbox" id="pswap" style="width:auto" ${lsGet('bt.swap', '0') === '1' ? 'checked' : ''} ${src === '2d' ? 'disabled' : ''}> Swap eyes</label>
+    <h5>This video is</h5>
+    <button data-s="" class="${!own ? 'on' : ''}">As detected (${SRCS[det]})</button>
+    ${Object.entries(SRCS).map(([k, l]) => `<button data-s="${k}" class="${own === k ? 'on' : ''}">${l}</button>`).join('')}
+    ${src === '2d' ? '<div class="hint">A 2D video plays in 2D. If it’s really two pictures side by side, pick its layout above.</div>' : ''}`;
+  m.hidden = false;
+  m.querySelectorAll('[data-v]').forEach(b => b.onclick = () => { lsSet('bt.view', b.dataset.v); setupRender(); menu3d(); });
+  m.querySelectorAll('[data-s]').forEach(b => b.onclick = () => { lsSet('bt.src.' + P.id, b.dataset.s || null); setupRender(); menu3d(); });
+  $('#pswap').onchange = ev => { lsSet('bt.swap', ev.target.checked ? '1' : '0'); };
+}
+function menuAudio() {
+  const m = $('#pmenu'), a = (P.sess && P.sess.audio) || [], cur = P.sess ? P.sess.audioN : -1;
+  m.innerHTML = '<h5>Audio</h5>' + a.map(t => `<button data-a="${t.n}" class="${cur === t.n || (cur < 0 && t.default) ? 'on' : ''}">${esc(t.name)}</button>`).join('');
+  m.hidden = false;
+  m.querySelectorAll('[data-a]').forEach(b => b.onclick = () => { P.audioN = +b.dataset.a; m.hidden = true; start(now()); });
+}
+const toggleMenu = (k, fill) => ev => {
+  ev.stopPropagation();
+  const m = $('#pmenu');
+  if (!m.hidden && m.dataset.k === k) { m.hidden = true; return; }
+  fill(); m.dataset.k = k;
+};
+$('#p3d').onclick = toggleMenu('3d', menu3d);
+$('#paud').onclick = toggleMenu('a', menuAudio);
+window.addEventListener('pagehide', () => { if (P.id) { saveProgress(true); stopStream(); } });
 
 let polling = false;
 async function poll() {

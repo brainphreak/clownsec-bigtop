@@ -48,6 +48,9 @@ left out.
 | `year` | int | |
 | `summary` | string | at most ~400 bytes in lists, complete in `/api/items/{id}` |
 | `genres` | string | `"Animation, Family"` |
+| `kind` | string | movies: `movie`, `short` or `musicvideo` (from the Clownsec catalog, or edited) |
+| `added` | int | unix time the file was first found |
+| `fmt` | string | the file's container: `MOFLEX`, `MP4`, `MKV`… |
 | `runtime` | int | minutes |
 | `is3d` | bool | |
 | `layout` | string | non-moflex 3D only: `hsbs` / `fsbs` |
@@ -126,10 +129,34 @@ resume point cleared. Without `dur`, the item's runtime is used. → `204 No Con
 ### `POST /api/items/{id}/watched?on=1`
 Mark watched (`on=1`) or unwatched (`on=0`) for this client, clearing the resume point. → `204`.
 
+## Browser player endpoints
+
+### `GET /api/items/{id}/web?at=<ms>&audio=<n>&client=<id>`
+Start a browser stream of any item at `at` (exact: a moflex starts at the keyframe before it and
+drops the gap). Answers once the first segment exists (or `500` with FFmpeg's error), with:
+
+```json
+{"url":"/api/web/<sid>/index.m3u8", "start":61000, "dur":5160353, "frame":"fsbs", "view":"3d",
+ "audio":[{"n":0,"name":"English (AC3 5.1)","default":true}], "audioN":-1, "title":"…", "pos":0}
+```
+
+`url` is an HLS playlist (H.264 + AAC, 2-second MPEG-TS segments; `EVENT` while it's being made)
+whose time 0 is `start` in the film. `frame` is the picture: `2d`, or both eyes side by side
+(`fsbs`: each eye at full width — a 3D moflex comes as 800×240; `hsbs`: squeezed). `view` is the
+item's 3D label. One stream per `client`: a new one stops the one before.
+
+### `GET /api/web/{sid}/{index.m3u8 | sNNNNN.ts}`
+The playlist and segments. `410` once the stream has ended (stopped, replaced, or 5 minutes unused).
+
+### `POST /api/web/{sid}/stop`
+Stop a stream (the player closed). → `204`.
+
 ## Setup page endpoints (`/admin/api`)
 
 These change the server, so they answer **only requests from the same computer** (loopback)
-unless *Allow this setup page from other computers* is on; otherwise `403`.
+unless *Allow this setup page from other computers* is on; otherwise `403`. Two are open to every
+device, for browsing and watching: `GET /admin/api/state` and `GET /admin/api/libraries/{id}/items`
+(to another device without that setting: `"viewer": true`, no folders, paths or settings).
 
 | Method | Path | Body / query | |
 |---|---|---|---|

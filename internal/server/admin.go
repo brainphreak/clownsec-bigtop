@@ -22,15 +22,22 @@ import (
 
 func (s *Server) adminRoutes(m *http.ServeMux) {
 	m.HandleFunc("GET /{$}", s.page)
+	m.HandleFunc("GET /hls.min.js", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		w.Header().Set("Cache-Control", "max-age=86400")
+		w.Write(web.HLS)
+	})
 	a := func(pattern string, h http.HandlerFunc) { m.HandleFunc(pattern, s.adminOnly(h)) }
-	a("GET /admin/api/state", s.adState)
+	// browsing and watching work from any device on the network, like the 3DS's own API; the rest
+	// only on the Big Top computer (or anywhere, with "allow remote admin" on)
+	m.HandleFunc("GET /admin/api/state", s.adState)
 	a("PUT /admin/api/settings", s.adSettings)
 	a("POST /admin/api/libraries", s.adAddLibrary)
 	a("PUT /admin/api/libraries/{id}", s.adEditLibrary)
 	a("DELETE /admin/api/libraries/{id}", s.adDeleteLibrary)
 	a("GET /admin/api/browse", s.adBrowse)
 	a("POST /admin/api/scan", s.adScan)
-	a("GET /admin/api/libraries/{id}/items", s.adItems)
+	m.HandleFunc("GET /admin/api/libraries/{id}/items", s.adItems)
 	a("PUT /admin/api/items/{id}", s.adEditItem)
 	a("POST /admin/api/items/{id}/poster", s.adItemPoster)
 	a("POST /admin/api/items/{id}/match", s.adMatchItem)
@@ -45,6 +52,12 @@ func (s *Server) adminRoutes(m *http.ServeMux) {
 }
 
 // adminOnly: the setup page changes things, so by default it answers only on this computer.
+// viewer: a device that may browse and watch but not change anything (another device, with
+// "allow remote admin" off).
+func (s *Server) viewer(r *http.Request) bool {
+	return !s.Cfg.Snapshot().AllowRemoteAdmin && !isLocal(r)
+}
+
 func (s *Server) adminOnly(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !s.Cfg.Snapshot().AllowRemoteAdmin && !isLocal(r) {
@@ -65,11 +78,6 @@ func isLocal(r *http.Request) bool {
 }
 
 func (s *Server) page(w http.ResponseWriter, r *http.Request) {
-	if !s.Cfg.Snapshot().AllowRemoteAdmin && !isLocal(r) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		io.WriteString(w, "Clownsec Big Top is running. Its setup page opens on the computer it runs on.\n")
-		return
-	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Write(web.Index)
@@ -83,6 +91,19 @@ func bad(w http.ResponseWriter, msg string) { http.Error(w, msg, http.StatusBadR
 
 func (s *Server) adState(w http.ResponseWriter, r *http.Request) {
 	c := s.Cfg.Snapshot()
+	if s.viewer(r) { // names and counts only: no folders, addresses or settings
+		s.Store.RLock()
+		libs := []map[string]any{}
+		for _, l := range s.Store.DB.Libraries {
+			libs = append(libs, map[string]any{"id": l.ID, "name": l.Name, "folders": []string{}})
+		}
+		s.Store.RUnlock()
+		ff := s.Media.Status()
+		writeJSON(w, map[string]any{"viewer": true, "name": c.Name, "version": s.Version, "libraries": libs,
+			"scan": map[string]any{"running": false}, "update": map[string]any{},
+			"ffmpeg": map[string]any{"found": ff.Found}})
+		return
+	}
 	cm, cs := s.Catalog.Count()
 	s.Store.RLock()
 	libs := []map[string]any{}
@@ -393,6 +414,11 @@ func (s *Server) adItems(w http.ResponseWriter, r *http.Request) {
 	for _, sh := range s.Store.DB.Shows {
 		if sh.Lib == id {
 			shows = append(shows, S{sh.ID, sh.Info(), sh.Detected, sh.Edit, sh.Poster != "", sh.PosterBy})
+		}
+	}
+	if s.viewer(r) { // a viewer sees titles, not where the files are
+		for i := range items {
+			items[i].Path = ""
 		}
 	}
 	writeJSON(w, map[string]any{"items": items, "shows": shows})

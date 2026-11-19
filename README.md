@@ -22,6 +22,7 @@ happily on an old PC, a laptop or a NAS-attached box.
 - [Requirements](#requirements)
 - [Installing and running](#installing-and-running)
 - [Connecting the 3DS](#connecting-the-3ds)
+- [Browsing and watching in a browser](#browsing-and-watching-in-a-browser)
 - [Libraries and scanning](#libraries-and-scanning)
 - [Naming your files](#naming-your-files)
 - [Where the info and posters come from](#where-the-info-and-posters-come-from)
@@ -182,6 +183,26 @@ Change or forget the server later in **Settings (X on the home screen) → BIG T
 **While watching**, everything works as for a file on the SD card. Over the network a seek or an
 audio-track switch takes a moment to buffer; while it does, touching the progress bar again,
 pressing left/right or pressing B changes your mind straight away instead of waiting.
+
+---
+
+## Browsing and watching in a browser
+
+The setup page is also a way to browse and watch, on the computer or on any phone, tablet or computer
+on your network (open `http://<the Big Top computer's address>:32500/`).
+
+- **Browse** by type (movies, TV shows, music videos, shorts), 3D or 2D, super moflex, genre and
+  first letter, sorted by date added, name, year or length, with a search over titles, genres and
+  years. Click a title for its details.
+- **Watch**: any video plays in the browser — moflex, MP4, MKV, AVI. Big Top converts it to H.264 as
+  it plays (FFmpeg), starting where you ask, so seeking anywhere is quick. Resume works per browser.
+  TV episodes go on to the next one.
+- **3D**: the **3D** button picks how 3D is shown — **Anaglyph** (red/cyan glasses; the default),
+  **Side by side — full** or **— half** for 3D TVs, projectors and VR viewers (go full screen), or
+  **2D**. *This video is* sets the file's own layout (2D / Half SBS / Full SBS) when Big Top's guess
+  from its name or super moflex info is wrong; *Swap eyes* if the depth looks inside out.
+- On other devices the page is **browse-and-watch only**: libraries, scanning, settings and editing
+  stay on the Big Top computer (unless *Allow this setup page from other computers* is on).
 
 ---
 
@@ -352,11 +373,14 @@ buffer; the button changes at once and the switch happens when you stop pressing
 | 32500 | TCP (HTTP) | the setup page, the 3DS's lists and posters, and the videos themselves |
 | 32501 | UDP | discovery: the 3DS broadcasts "is there a Big Top here?" and Big Top answers |
 
-- **The setup page only works on the computer Big Top runs on.** From another device it refuses
-  (Settings → *Allow this setup page from other computers* changes that).
+- **The setup page only changes things from the computer Big Top runs on.** Other devices can browse
+  and watch, but not edit, scan or change settings (Settings → *Allow this setup page from other
+  computers* changes that).
 - **Watching needs no login**: anything on your network that can reach port 32500 can list and play
   your videos. That's normal for a home media box, and why **Big Top must not be exposed to the
   internet** — don't forward its ports on your router.
+- Watching in a browser keeps a few minutes of converted video in the data folder (`web/`), deleted
+  as it plays and when Big Top starts.
 - Big Top's only outgoing requests are to clownsec.com (the catalog and its artwork) and to GitHub
   (checking for, and downloading, updates).
 
@@ -473,6 +497,8 @@ measured against Nintendo's encoder on 3DS hardware. The patch, its notes and th
 Each Big Top download carries the encoder for its system and writes it into the data folder the
 first time it's needed. FFmpeg, x264 and so the encoder are licensed under the **GPL**; their source
 is at the links above.
+
+The browser player uses [hls.js](https://github.com/video-dev/hls.js) (Apache-2.0), built in.
 
 ---
 
