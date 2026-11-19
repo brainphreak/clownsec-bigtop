@@ -814,6 +814,7 @@ const webClient = (() => {
   catch { return 'web'; }
 })();
 const lsGet = (k, d) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } };
+try { localStorage.removeItem('bt.view'); localStorage.removeItem('bt.swap'); } catch {}
 const lsSet = (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch {} };
 const fmtTime = ms => { const t = Math.max(0, Math.floor(ms / 1000)), h = Math.floor(t / 3600), m = Math.floor(t / 60) % 60, x = String(t % 60).padStart(2, '0');
   return h ? `${h}:${String(m).padStart(2, '0')}:${x}` : `${m}:${x}`; };
@@ -832,7 +833,10 @@ function needHls() {
 }
 
 function srcLayout() { return lsGet('bt.src.' + P.id, '') || (P.sess && P.sess.frame) || '2d'; }
-function viewMode() { return srcLayout() === '2d' ? '2d' : lsGet('bt.view', 'anaglyph'); }
+// Every choice in the 3D menu belongs to one video: each video starts from what was detected (3D:
+// anaglyph), and a change is remembered for that video only.
+function viewMode() { return srcLayout() === '2d' ? '2d' : lsGet('bt.view.' + P.id, 'anaglyph'); }
+const swapped = () => lsGet('bt.swap.' + P.id, '0') === '1';
 const now = () => P.sess ? P.sess.start + Math.max(0, pv.currentTime - P.base) * 1000 : 0;
 
 async function watch(id, at) {
@@ -987,7 +991,7 @@ function setupRender() {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, pv);
     gl.uniform1i(u('mode'), view === 'anaglyph' ? 1 : view === '2d' ? 0 : 2);
     gl.uniform1i(u('sbs'), src === '2d' ? 0 : 1);
-    gl.uniform1i(u('swap'), lsGet('bt.swap', '0') === '1' ? 1 : 0);
+    gl.uniform1i(u('swap'), swapped() ? 1 : 0);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   };
   draw();
@@ -1065,15 +1069,15 @@ function menu3d() {
   const src = srcLayout(), view = viewMode(), det = (P.sess && P.sess.frame) || '2d', own = lsGet('bt.src.' + P.id, '');
   const m = $('#pmenu');
   m.innerHTML = `<h5>View</h5>${Object.entries(VIEWS).map(([k, l]) => `<button data-v="${k}" class="${view === k ? 'on' : ''}" ${src === '2d' && k !== '2d' ? 'disabled' : ''}>${l}</button>`).join('')}
-    <label style="display:flex;gap:8px;align-items:center;color:#fff;font-size:14px;padding:6px 8px"><input type="checkbox" id="pswap" style="width:auto" ${lsGet('bt.swap', '0') === '1' ? 'checked' : ''} ${src === '2d' ? 'disabled' : ''}> Swap eyes</label>
+    <label style="display:flex;gap:8px;align-items:center;color:#fff;font-size:14px;padding:6px 8px"><input type="checkbox" id="pswap" style="width:auto" ${swapped() ? 'checked' : ''} ${src === '2d' ? 'disabled' : ''}> Swap eyes</label>
     <h5>This video is</h5>
     <button data-s="" class="${!own ? 'on' : ''}">As detected (${SRCS[det]})</button>
     ${Object.entries(SRCS).map(([k, l]) => `<button data-s="${k}" class="${own === k ? 'on' : ''}">${l}</button>`).join('')}
     ${src === '2d' ? '<div class="hint">A 2D video plays in 2D. If it’s really two pictures side by side, pick its layout above.</div>' : ''}`;
   m.hidden = false;
-  m.querySelectorAll('[data-v]').forEach(b => b.onclick = () => { lsSet('bt.view', b.dataset.v); setupRender(); menu3d(); });
+  m.querySelectorAll('[data-v]').forEach(b => b.onclick = () => { lsSet('bt.view.' + P.id, b.dataset.v === 'anaglyph' ? null : b.dataset.v); setupRender(); menu3d(); });
   m.querySelectorAll('[data-s]').forEach(b => b.onclick = () => { lsSet('bt.src.' + P.id, b.dataset.s || null); setupRender(); menu3d(); });
-  $('#pswap').onchange = ev => { lsSet('bt.swap', ev.target.checked ? '1' : '0'); };
+  $('#pswap').onchange = ev => { lsSet('bt.swap.' + P.id, ev.target.checked ? '1' : null); };
 }
 function menuAudio() {
   const m = $('#pmenu'), a = (P.sess && P.sess.audio) || [], cur = P.sess ? P.sess.audioN : -1;
