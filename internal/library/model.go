@@ -29,6 +29,20 @@ type Info struct {
 	Season   int    `json:"season,omitempty"`
 	Episode  int    `json:"episode,omitempty"`
 	EpTitle  string `json:"epTitle,omitempty"`
+	Kind     string `json:"kind,omitempty"` // not an episode: "movie", "short", "musicvideo" ("" = movie)
+}
+
+// Kinds a title can be (TV episodes are grouped into shows instead).
+var Kinds = []string{"movie", "short", "musicvideo"}
+
+// KindOf normalises a kind; anything unknown is a movie.
+func KindOf(k string) string {
+	for _, x := range Kinds {
+		if k == x {
+			return k
+		}
+	}
+	return "movie"
 }
 
 // over lays the set fields of top over base.
@@ -66,6 +80,9 @@ func over(base, top Info) Info {
 	}
 	if top.EpTitle != "" {
 		r.EpTitle = top.EpTitle
+	}
+	if top.Kind != "" {
+		r.Kind = top.Kind
 	}
 	return r
 }

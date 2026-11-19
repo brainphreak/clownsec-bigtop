@@ -425,6 +425,7 @@ func fromCatalog(det library.Info, e *catalog.Entry, exact bool) library.Info {
 	det.Genres = strings.Join(e.Genres, ", ")
 	det.Runtime = e.Runtime
 	det.Summary = e.Description
+	det.Kind = library.KindOf(e.Type)
 	if exact && e.Is3D() {
 		det.Is3D = "3d"
 	}

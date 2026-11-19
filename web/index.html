@@ -70,6 +70,41 @@ dialog::backdrop { background: #000b; }
 .ep .x { flex: 1; }
 .err { color: var(--accent); font-size: 13px; margin-top: 8px; min-height: 1em; }
 .empty { color: var(--dim); padding: 30px; text-align: center; }
+/* browsing: filters, genres, A-Z, the detail view */
+.filters { display: grid; gap: 10px; margin-bottom: 16px; }
+.filters > * { min-width: 0; }   /* a scrolling row must not widen the page */
+.chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.chips .lbl { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: .6px; margin-right: 2px; }
+.chip { font-size: 13px; padding: 4px 11px; border-radius: 99px; white-space: nowrap; }
+.chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.chip .c { opacity: .65; font-size: 11px; margin-left: 5px; }
+.letters { display: flex; gap: 3px; flex-wrap: wrap; }
+.letters button { padding: 3px 0; min-width: 30px; font-size: 12px; border-radius: 6px; }
+.letters button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.filters select { width: auto; padding: 4px 8px; font-size: 13px; }
+.count { font-size: 13px; color: var(--dim); }
+@media (max-width: 640px) {
+  .scrollrow { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; padding-bottom: 2px; }
+  .scrollrow::-webkit-scrollbar { display: none; }
+  .scrollrow > * { flex: none; }
+  .grid { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 10px; }
+  main { padding: 14px 16px 60px; }
+  header { padding: 12px 16px; gap: 10px; }
+  .lib { flex-wrap: wrap; }
+}
+.tile .art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; }
+.tile .prog { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: #0008; }
+.tile .prog div { height: 100%; background: var(--accent); }
+.detail { display: grid; grid-template-columns: 200px 1fr; gap: 20px; margin-top: 4px; }
+.detail .art { aspect-ratio: 175 / 250; border-radius: 8px; background: var(--panel2); border: 1px solid var(--line); overflow: hidden; }
+.detail .art img { width: 100%; height: 100%; object-fit: fill; display: block; }
+.detail h3 { font-size: 22px; margin: 0 0 6px; }
+.meta { color: var(--dim); font-size: 13px; display: flex; gap: 6px 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.tags { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.detail p.sum { margin: 0 0 12px; white-space: pre-line; }
+.seasons { margin-top: 12px; }
+.seasons h4 { margin: 14px 0 4px; font-size: 13px; color: var(--dim); text-transform: uppercase; letter-spacing: .6px; }
+@media (max-width: 640px) { .detail { grid-template-columns: 110px 1fr; gap: 14px; } .detail h3 { font-size: 18px; } }
 </style>
 </head>
 <body>
@@ -105,7 +140,23 @@ dialog::backdrop { background: #000b; }
 
   <h2>Browse</h2>
   <div class="tabs" id="tabs"></div>
-  <div class="row" style="margin-bottom:12px"><input id="search" placeholder="Search this library…"></div>
+  <div class="filters" id="filters">
+    <input id="search" type="search" placeholder="Search titles, genres, years…" autocomplete="off">
+    <div class="chips scrollrow" id="fkind"></div>
+    <div class="chips scrollrow">
+      <span class="lbl">Sort</span>
+      <select id="fsort"><option value="added">Recently added</option><option value="title">Name</option>
+        <option value="year">Year (newest)</option><option value="yearAsc">Year (oldest)</option><option value="runtime">Length</option></select>
+      <span class="lbl" style="margin-left:8px">Show</span>
+      <span id="f3d"></span>
+      <button class="chip" id="fsup" title="Only super moflex files">Super only</button>
+      <span class="grow"></span>
+      <span class="count" id="fcount"></span>
+      <button class="chip" id="fclear" hidden>Clear filters</button>
+    </div>
+    <div class="chips scrollrow" id="fgenre"></div>
+    <div class="letters scrollrow" id="fletter"></div>
+  </div>
   <div class="grid" id="grid"></div>
 </main>
 
@@ -236,33 +287,178 @@ async function loadLib() {
   renderGrid();
 }
 
-function renderGrid() {
-  const q = $('#search').value.trim().toLowerCase();
-  const tiles = [];
+// ---------- browsing ----------
+// The filters, kept between visits (per viewer, in this browser).
+const F = Object.assign({ kind: 'all', d3: 'all', sup: false, sort: 'added', genre: 'all', letter: 'all' },
+  (() => { try { return JSON.parse(localStorage.getItem('bt.browse') || '{}'); } catch { return {}; } })());
+const saveF = () => { try { localStorage.setItem('bt.browse', JSON.stringify(F)); } catch {} };
+const KIND = { all: 'All', movie: 'Movies', tvshow: 'TV shows', musicvideo: 'Music videos', short: 'Shorts' };
+const KIND1 = { movie: 'Movie', tvshow: 'TV show', musicvideo: 'Music video', short: 'Short', episode: 'Episode' };
+const LETTERS = ['#', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'];
+// "The Matrix" files under M, as on clownsec.com
+const sortTitle = t => (t || '').replace(/^(the|a|an)\s+/i, '').trim();
+const letterOf = t => { const c = sortTitle(t).charAt(0).toUpperCase(); return c >= 'A' && c <= 'Z' ? c : '#'; };
+const genresOf = g => (g || '').split(',').map(x => x.trim()).filter(Boolean);
+const fmtMin = m => m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`;
+const is3d = v => ['3d', 'hsbs', 'fsbs'].includes(v);
+
+// every title of the library once: movies/shorts/music videos, and shows (their episodes inside)
+function titles() {
+  const out = [];
   for (const it of libData.items) {
     if (it.missing || it.showId) continue;
-    tiles.push({ kind: 'item', id: it.id, title: it.info.title, sub: it.info.year || '', poster: it.poster, is3d: ['3d', 'hsbs', 'fsbs'].includes(it.info.is3d), src: it.source, sup: it.super });
+    out.push({ kind: it.kind || 'movie', id: it.id, title: it.info.title || 'Untitled', year: it.info.year || 0,
+      genres: genresOf(it.info.genres), added: it.added || 0, runtime: it.info.runtime || Math.round((it.dur || 0) / 60000),
+      is3d: is3d(it.info.is3d), sup: it.super, src: it.source, poster: it.poster, sum: it.info.summary || '' });
   }
   for (const sh of libData.shows) {
-    const eps = libData.items.filter(i => i.showId === sh.id && !i.missing).length;
-    if (!eps) continue;
-    tiles.push({ kind: 'show', id: sh.id, title: sh.info.title, sub: `${eps} episodes`, poster: sh.poster, src: 'show' });
+    const eps = libData.items.filter(i => i.showId === sh.id && !i.missing);
+    if (!eps.length) continue;
+    out.push({ kind: 'tvshow', id: sh.id, title: sh.info.title || 'Untitled', year: sh.info.year || 0,
+      genres: genresOf(sh.info.genres), added: Math.max(...eps.map(e => e.added || 0)), runtime: 0,
+      is3d: eps.some(e => is3d(e.info.is3d)), sup: eps.some(e => e.super), src: 'show', poster: sh.poster,
+      sum: sh.info.summary || '', eps: eps.length });
   }
-  const shown = tiles.filter(t => !q || (t.title || '').toLowerCase().includes(q))
-                     .sort((a, b) => (a.title || '').localeCompare(b.title || ''));
-  if (!shown.length) { $('#grid').innerHTML = `<div class="empty">${curLib ? 'Nothing here yet.' : ''}</div>`; return; }
+  return out;
+}
+
+function chip(label, on, data, count) {
+  return `<button class="chip ${on ? 'on' : ''}" ${data}>${esc(label)}${count != null ? `<span class="c">${count}</span>` : ''}</button>`;
+}
+
+function renderGrid() {
+  const all = titles();
+  const q = $('#search').value.trim().toLowerCase();
+  const words = q.split(/\s+/).filter(Boolean);
+  const match = t => words.every(w => t.title.toLowerCase().includes(w) || String(t.year) === w ||
+    t.genres.some(g => g.toLowerCase().includes(w)));
+  // each filter row counts what the *other* filters leave, so its numbers say what a click would show
+  const pass = (t, skip) => (skip === 'kind' || F.kind === 'all' || t.kind === F.kind) &&
+    (skip === 'd3' || F.d3 === 'all' || (F.d3 === '3d') === t.is3d) &&
+    (!F.sup || t.sup) &&
+    (skip === 'genre' || F.genre === 'all' || t.genres.includes(F.genre)) &&
+    (skip === 'letter' || F.letter === 'all' || letterOf(t.title) === F.letter) &&
+    (!words.length || match(t));
+
+  const kinds = {}; all.filter(t => pass(t, 'kind')).forEach(t => kinds[t.kind] = (kinds[t.kind] || 0) + 1);
+  if (F.kind !== 'all' && !all.some(t => t.kind === F.kind)) F.kind = 'all';
+  const kn = Object.keys(KIND).filter(k => k === 'all' || all.some(t => t.kind === k));
+  $('#fkind').innerHTML = kn.length > 2 || F.kind !== 'all'
+    ? kn.map(k => chip(KIND[k], F.kind === k, `data-k="${k}"`, k === 'all' ? null : kinds[k] || 0)).join('') : '';
+
+  const d3 = { '3d': 0, '2d': 0 }; all.filter(t => pass(t, 'd3')).forEach(t => d3[t.is3d ? '3d' : '2d']++);
+  $('#f3d').innerHTML = [['all', 'All'], ['3d', '3D'], ['2d', '2D']]
+    .map(([k, l]) => chip(l, F.d3 === k, `data-d="${k}"`, k === 'all' ? null : d3[k])).join(' ');
+  $('#fsup').classList.toggle('on', F.sup);
+  $('#fsup').hidden = !all.some(t => t.sup);
+
+  const gc = {}; all.filter(t => pass(t, 'genre')).forEach(t => t.genres.forEach(g => gc[g] = (gc[g] || 0) + 1));
+  const gAll = [...new Set(all.flatMap(t => t.genres))].sort((a, b) => a.localeCompare(b));
+  if (F.genre !== 'all' && !gAll.includes(F.genre)) F.genre = 'all';
+  $('#fgenre').innerHTML = gAll.length ? '<span class="lbl">Genre</span>' + chip('All', F.genre === 'all', 'data-g=""') +
+    gAll.map(g => chip(g, F.genre === g, `data-g="${esc(g)}"`, gc[g] || 0)).join('') : '';
+
+  const lc = {}; all.filter(t => pass(t, 'letter')).forEach(t => { const l = letterOf(t.title); lc[l] = (lc[l] || 0) + 1; });
+  $('#fletter').innerHTML = `<button class="${F.letter === 'all' ? 'on' : ''}" data-l="all">All</button>` +
+    LETTERS.map(l => `<button class="${F.letter === l ? 'on' : ''}" data-l="${l}" ${lc[l] || F.letter === l ? '' : 'disabled'}>${l}</button>`).join('');
+  $('#fsort').value = F.sort;
+
+  const by = {
+    added: (a, b) => b.added - a.added,
+    title: () => 0,
+    year: (a, b) => b.year - a.year,
+    yearAsc: (a, b) => (a.year || 9999) - (b.year || 9999),
+    runtime: (a, b) => b.runtime - a.runtime,
+  }[F.sort] || (() => 0);
+  const shown = all.filter(t => pass(t)).sort((a, b) => by(a, b) || sortTitle(a.title).localeCompare(sortTitle(b.title)));
+  const filtered = F.kind !== 'all' || F.d3 !== 'all' || F.sup || F.genre !== 'all' || F.letter !== 'all' || words.length;
+  $('#fcount').textContent = filtered ? `${shown.length} of ${all.length}` : `${all.length} titles`;
+  $('#fclear').hidden = !filtered;
+
+  if (!shown.length) { $('#grid').innerHTML = `<div class="empty">${!curLib ? '' : all.length ? 'Nothing matches these filters.' : 'Nothing here yet.'}</div>`; return; }
   $('#grid').innerHTML = shown.map(t => {
-    const url = t.kind === 'show' ? `/api/shows/${t.id}/poster?w=280&h=400&v=${bust}` : `/api/items/${t.id}/poster?w=280&h=400&v=${bust}`;
+    const url = t.kind === 'tvshow' ? `/api/shows/${t.id}/poster?w=280&h=400&v=${bust}` : `/api/items/${t.id}/poster?w=280&h=400&v=${bust}`;
     const tag = t.sup ? '<span class="badge r bsup">SUPER</span>' : t.src === 'filename' ? '<span class="badge r bfn" title="Only the file name was recognised">CHECK</span>' : '';
-    return `<div class="tile" data-kind="${t.kind}" data-id="${t.id}">
-      <div class="art" style="${t.poster ? `background-image:url('${url}')` : ''}">
-        ${t.poster ? '' : `<div class="none">${esc(t.title)}</div>`}
-        ${t.is3d ? '<span class="badge b3d">3D</span>' : ''}${tag}
-      </div>
-      <div class="t" title="${esc(t.title)}">${esc(t.title)}</div><div class="s">${esc(t.sub)}</div></div>`;
+    const sub = t.kind === 'tvshow' ? `${t.eps} episode${t.eps === 1 ? '' : 's'}` : (t.year || '');
+    return `<div class="tile" data-kind="${t.kind === 'tvshow' ? 'show' : 'item'}" data-id="${t.id}" tabindex="0">
+      <div class="art">${t.poster ? `<img src="${url}" alt="" loading="lazy" decoding="async">` : `<div class="none">${esc(t.title)}</div>`}
+        ${t.is3d ? '<span class="badge b3d">3D</span>' : ''}${tag}</div>
+      <div class="t" title="${esc(t.title)}">${esc(t.title)}</div><div class="s">${esc(sub)}</div></div>`;
   }).join('');
-  $('#grid').querySelectorAll('.tile').forEach(el => el.onclick = () =>
-    el.dataset.kind === 'show' ? showDialog(el.dataset.id) : itemDialog(el.dataset.id));
+  $('#grid').querySelectorAll('.tile').forEach(el => {
+    const go = () => el.dataset.kind === 'show' ? showDetail(el.dataset.id) : itemDetail(el.dataset.id);
+    el.onclick = go;
+    el.onkeydown = ev => { if (ev.key === 'Enter') go(); };
+  });
+}
+
+function setF(k, v) { F[k] = v; saveF(); renderGrid(); }
+$('#filters').addEventListener('click', ev => {
+  const b = ev.target.closest('button'); if (!b) return;
+  if (b.dataset.k) setF('kind', b.dataset.k);
+  else if (b.dataset.d) setF('d3', b.dataset.d);
+  else if (b.dataset.g !== undefined) setF('genre', b.dataset.g || 'all');
+  else if (b.dataset.l) setF('letter', b.dataset.l);
+  else if (b.id === 'fsup') setF('sup', !F.sup);
+  else if (b.id === 'fclear') { Object.assign(F, { kind: 'all', d3: 'all', sup: false, genre: 'all', letter: 'all' }); $('#search').value = ''; saveF(); renderGrid(); }
+});
+$('#fsort').onchange = () => setF('sort', $('#fsort').value);
+$('#search').oninput = () => renderGrid();
+
+// ---------- detail views (click a title) ----------
+function tagsOf(it) {
+  const t = [];
+  if (is3d(it.info.is3d)) t.push(`<span class="pill b3d">${{ hsbs: '3D Half SBS', fsbs: '3D Full SBS' }[it.info.is3d] || '3D'}</span>`);
+  if (it.fmt) t.push(`<span class="pill">${esc(it.fmt)}</span>`);
+  if (it.super) t.push('<span class="pill bsup">SUPER MOFLEX</span>');
+  return t.join('');
+}
+
+function itemDetail(id) {
+  const it = libData.items.find(x => x.id === id); if (!it) return;
+  const i = it.info;
+  const meta = [i.year, KIND1[it.kind], i.runtime ? fmtMin(i.runtime) : it.dur ? fmtMin(Math.round(it.dur / 60000)) : '',
+    genresOf(i.genres).join(', ')].filter(Boolean);
+  open(`
+    <div class="detail">
+      <div class="art">${it.poster ? `<img src="/api/items/${id}/poster?w=340&h=486&v=${bust}" alt="">` : ''}</div>
+      <div>
+        <h3>${esc(i.title || 'Untitled')}</h3>
+        <div class="meta">${meta.map(m => `<span>${esc(m)}</span>`).join('')}</div>
+        <div class="tags">${tagsOf(it)}</div>
+        ${i.summary ? `<p class="sum">${esc(i.summary)}</p>` : ''}
+        <div class="path">${esc(it.path)}</div>
+      </div>
+    </div>
+    <div class="actions"><button id="dclose" style="margin-right:auto">Close</button><button id="dedit">Edit info</button></div>`);
+  $('#dclose').onclick = close;
+  $('#dedit').onclick = () => itemDialog(id);
+}
+
+function showDetail(sid) {
+  const sh = libData.shows.find(x => x.id === sid); if (!sh) return;
+  const eps = libData.items.filter(i => i.showId === sid && !i.missing)
+    .sort((a, b) => (a.info.season - b.info.season) || (a.info.episode - b.info.episode));
+  const seasons = [...new Set(eps.map(e => e.info.season))];
+  const i = sh.info;
+  const meta = [i.year, `${seasons.length} season${seasons.length === 1 ? '' : 's'}`, `${eps.length} episodes`, genresOf(i.genres).join(', ')].filter(Boolean);
+  open(`
+    <div class="detail">
+      <div class="art">${sh.poster ? `<img src="/api/shows/${sid}/poster?w=340&h=486&v=${bust}" alt="">` : ''}</div>
+      <div>
+        <h3>${esc(i.title || 'Untitled')}</h3>
+        <div class="meta">${meta.map(m => `<span>${esc(m)}</span>`).join('')}</div>
+        ${eps.some(e => is3d(e.info.is3d)) ? '<div class="tags"><span class="pill b3d">3D</span></div>' : ''}
+        ${i.summary ? `<p class="sum">${esc(i.summary)}</p>` : ''}
+      </div>
+    </div>
+    <div class="seasons">${seasons.map(n => `<h4>Season ${n}</h4>` + eps.filter(e => e.info.season === n).map(x =>
+      `<div class="ep"><span class="n">E${x.info.episode}</span><span class="x">${esc(x.info.epTitle || x.info.title || '')}</span>
+        ${x.fmt ? `<span class="hint">${esc(x.fmt)}</span>` : ''}<button class="small" data-epd="${x.id}">Details</button></div>`).join('')).join('')}</div>
+    <div class="actions"><button id="dclose" style="margin-right:auto">Close</button><button id="dedit">Edit show</button></div>`);
+  $('#dclose').onclick = close;
+  $('#dedit').onclick = () => showDialog(sid);
+  document.querySelectorAll('[data-epd]').forEach(b => b.onclick = () => itemDetail(b.dataset.epd));
 }
 
 // ---------- dialogs ----------
@@ -378,6 +574,9 @@ function itemDialog(id) {
         <div class="row"><div>${field('egen', 'Genres', e.genres, d.genres)}</div>
           <div style="max-width:110px">${field('erun', 'Minutes', e.runtime || '', d.runtime, 'number')}</div>
           <div style="max-width:190px"><label for="e3d">3D</label>${is3dSel(e.is3d, it.moflex, d.is3d)}</div></div>
+        ${ep ? '' : `<div class="row"><div style="max-width:240px"><label for="ekind">Type</label><select id="ekind">
+          <option value="">As detected (${KIND1[d.kind || 'movie']})</option>
+          ${['movie', 'short', 'musicvideo'].map(k => `<option value="${k}" ${e.kind === k ? 'selected' : ''}>${KIND1[k]}</option>`).join('')}</select></div></div>`}
         ${ep ? '' : `<label>Not the right movie? Find it in the Clownsec catalog</label>
           <div class="row"><input id="cq" placeholder="Search the catalog…" value="${esc(it.info.title)}"><button id="cgo" style="flex:none">Search</button></div>
           <div id="cres"></div>`}
@@ -391,7 +590,7 @@ function itemDialog(id) {
         epTitle: $('#etitle').value.trim(), title: $('#etitle').value.trim(),
         summary: $('#esum').value.trim(), genres: $('#egen').value.trim(), runtime: num($('#erun').value), is3d: $('#e3d').value }
     : { title: $('#etitle').value.trim(), year: num($('#eyear').value), summary: $('#esum').value.trim(),
-        genres: $('#egen').value.trim(), runtime: num($('#erun').value), is3d: $('#e3d').value };
+        genres: $('#egen').value.trim(), runtime: num($('#erun').value), is3d: $('#e3d').value, kind: $('#ekind').value };
   $('#ecancel').onclick = close;
   $('#esave').onclick = async () => { try { await api('PUT', `/admin/api/items/${id}`, collect()); close(); loadLib(); } catch (x) { $('#eerr').textContent = x.message; } };
   $('#ereset').onclick = async () => { await api('PUT', `/admin/api/items/${id}`, {}); close(); loadLib(); };
@@ -525,7 +724,6 @@ $('#quitbtn').onclick = async () => {
   document.body.innerHTML = '<main><h2>Big Top has stopped.</h2><p class="hint">Start it again to keep watching.</p></main>';
 };
 $('#scanbtn').onclick = async () => { await api('POST', '/admin/api/scan'); poll(); };
-$('#search').oninput = renderGrid;
 
 let polling = false;
 async function poll() {

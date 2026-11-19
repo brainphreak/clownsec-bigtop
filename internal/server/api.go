@@ -79,6 +79,8 @@ type Entry struct {
 	Size     int64  `json:"size,omitempty"`
 	Super    bool   `json:"super,omitempty"`
 	Format   string `json:"fmt,omitempty"`      // the file's container: "MOFLEX", "MP4", "MKV", ...
+	Kind     string `json:"kind,omitempty"`     // movies: "movie", "short", "musicvideo"
+	Added    int64  `json:"added,omitempty"`    // unix time first found
 	Episodes int    `json:"episodes,omitempty"` // shows/seasons: how many
 	Seen     int    `json:"seen,omitempty"`     // ...and how many watched
 	Audio    string `json:"audio,omitempty"`
@@ -114,11 +116,31 @@ func clip(s string, n int) string {
 	return s[:n] + "..."
 }
 
+// kindOf: a title's kind -- its own (detected or edited), else its catalog entry's (titles matched
+// before Big Top recorded kinds), else a movie.
+func (s *Server) kindOf(it *library.Item) string {
+	if k := it.Info().Kind; k != "" {
+		return library.KindOf(k)
+	}
+	if it.Catalog != "" && s.Catalog != nil {
+		if e := s.Catalog.ByID(it.Catalog); e != nil {
+			return library.KindOf(e.Type)
+		}
+	}
+	return "movie"
+}
+
+// fileFormat: a file's container as shown to people ("MOFLEX", "MP4", "MKV", ...).
+func fileFormat(path string) string {
+	return strings.ToUpper(strings.TrimPrefix(filepath.Ext(path), "."))
+}
+
 // itemEntry: caller holds a read lock.
 func (s *Server) itemEntry(it *library.Item, client string, full bool) Entry {
 	in := it.Info()
 	e := Entry{Type: "movie", ID: it.ID, Title: in.Title, Year: in.Year, Genres: in.Genres,
-		Runtime: in.Runtime, Is3D: library.Stereo3D(in.Is3D), Poster: it.Poster != "", Size: it.Size, Super: it.Super}
+		Runtime: in.Runtime, Is3D: library.Stereo3D(in.Is3D), Poster: it.Poster != "", Size: it.Size, Super: it.Super,
+		Kind: s.kindOf(it), Added: it.Added}
 	if in.Is3D == "hsbs" || in.Is3D == "fsbs" {
 		e.Layout = in.Is3D
 	}
@@ -131,7 +153,7 @@ func (s *Server) itemEntry(it *library.Item, client string, full bool) Entry {
 	if e.Title == "" {
 		e.Title = strings.TrimSuffix(filepath.Base(it.Path), filepath.Ext(it.Path))
 	}
-	e.Format = strings.ToUpper(strings.TrimPrefix(filepath.Ext(it.Path), "."))
+	e.Format = fileFormat(it.Path)
 	e.Summary = in.Summary
 	if !full {
 		e.Summary = clip(e.Summary, 400)

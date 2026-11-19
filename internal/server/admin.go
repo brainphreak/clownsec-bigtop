@@ -360,6 +360,10 @@ func (s *Server) adItems(w http.ResponseWriter, r *http.Request) {
 		Super    bool         `json:"super,omitempty"`
 		Moflex   bool         `json:"moflex"`
 		ShowID   string       `json:"showId,omitempty"`
+		Kind     string       `json:"kind"`  // movie / short / musicvideo (episodes: "episode")
+		Added    int64        `json:"added"` // unix time it was first found
+		Fmt      string       `json:"fmt"`   // container: MOFLEX, MP4, MKV...
+		DurMs    int64        `json:"dur,omitempty"`
 	}
 	type S struct {
 		ID       string       `json:"id"`
@@ -376,9 +380,13 @@ func (s *Server) adItems(w http.ResponseWriter, r *http.Request) {
 		}
 		x := I{ID: it.ID, Path: it.Path, Missing: it.Missing != 0, Info: it.Info(), Detected: it.Detected,
 			Edit: it.Edit, Source: it.Source, Poster: it.Poster != "", PosterBy: it.PosterBy, Super: it.Super,
-			Moflex: library.IsMoflex(it.Path)}
+			Moflex: library.IsMoflex(it.Path), Kind: s.kindOf(it), Added: it.Added, Fmt: fileFormat(it.Path)}
+		if it.Media != nil {
+			x.DurMs = it.Media.DurMs
+		}
 		if it.IsEpisode() {
 			x.ShowID = library.ShowID(id, x.Info.Show)
+			x.Kind = "episode"
 		}
 		items = append(items, x)
 	}
@@ -413,6 +421,9 @@ func (s *Server) adEditItem(w http.ResponseWriter, r *http.Request) {
 			}
 		default:
 			in.Is3D = ""
+		}
+		if in.Kind != "" {
+			in.Kind = library.KindOf(in.Kind)
 		}
 		it.Edit = in
 	}
@@ -524,6 +535,7 @@ func (s *Server) adMatchItem(w http.ResponseWriter, r *http.Request) {
 		ed := it.Edit
 		ed.Title, ed.Year, ed.Summary = e.Title, e.Year, e.Description
 		ed.Genres, ed.Runtime = strings.Join(e.Genres, ", "), e.Runtime
+		ed.Kind = library.KindOf(e.Type)
 		it.Edit, it.Catalog = ed, e.ID
 		if fn != "" {
 			it.Poster, it.PosterBy = fn, "user"
