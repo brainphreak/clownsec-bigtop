@@ -156,10 +156,11 @@ func IsMoflex(path string) bool { return strings.EqualFold(filepath.Ext(path), "
 // Info is the item's metadata as shown: detected, with the user's edits on top.
 func (it *Item) Info() Info { return over(it.Detected, it.Edit) }
 
-// IsEpisode: an item is a TV episode once it has a show and an episode number.
+// IsEpisode: an item is a TV episode once it has a show and a season or episode number
+// (a special can be episode 0 of a season, or any episode of season 0).
 func (it *Item) IsEpisode() bool {
 	in := it.Info()
-	return in.Show != "" && in.Episode > 0
+	return in.Show != "" && (in.Season > 0 || in.Episode > 0)
 }
 
 // Show groups episodes. Its id comes from the library + show title, so it is stable.

@@ -265,6 +265,11 @@ Show 1-02 Episode Title.moflex              Danny Phantom 1-01 Mystery Meat.mofl
 
 Episodes with the same show name in a library become one show, with seasons. Write the show's name
 the same way on every episode (or fix it in the setup page — see [Editing info](#editing-info)).
+Case, punctuation, the year and `(3D)` / `(S)` don't matter.
+
+**Specials:** season 0 holds a show's specials (`S00E03`) and is listed as **Specials**, after the
+numbered seasons. Episode 0 is a season's special (`S04E00`) and comes before that season's
+episode 1.
 
 ### 3D hints
 
@@ -284,9 +289,13 @@ wins where both have a value:
    - Anything else is matched by title and year (a year off by one still matches), shows by title.
    - Gives the title, year, genres, runtime, description, the "in 3D" poster, and episode titles.
 3. **SUPER MOFLEX files** carry their own info in a trailer at the end of the file: title, year,
-   genres, runtime, description, 3D flag and poster. A super moflex tagged *TV Shows* also names its
-   show (that's what groups episodes), the show's description, and its season / episode / episode
-   title (in its summary, `S1.E2 "Title" - ...`) — so it's placed right even if the file was renamed.
+   genres, runtime, description, 3D flag and poster. Files made with Moflex Studio 1.7 or later also
+   say what they are — movie, TV episode, short or music video — and, for an episode, its season,
+   episode and episode title, while the title is the show's name (that's what groups episodes). That
+   info wins over the file name, so a renamed file stays in its show and keeps its place, and a
+   movie stays a movie whatever its name. Older super moflex files fall back to the file name for
+   season and episode (or to a summary starting `S1.E2 "Title" - ...`). To fix one's show name, open
+   it in Moflex Studio, correct it and save: renaming the file doesn't change what's inside it.
 4. **Your edits** in the setup page — always win, and survive every rescan.
 
 **Posters:** your own upload wins; otherwise the catalog's artwork (it's larger than the poster

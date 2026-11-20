@@ -243,6 +243,8 @@ body.viewer .admin { display: none !important; }   /* an inline display:flex wou
 </div>
 
 <script>
+// season 0 (the specials) after the numbered seasons, as on the 3DS
+const seasonOrder = n => (n || 0) === 0 ? 1e9 : n;
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function api(method, url, body, raw) {
@@ -555,8 +557,8 @@ async function watchButtons(id, box) {
 function showDetail(sid) {
   const sh = libData.shows.find(x => x.id === sid); if (!sh) return;
   const eps = libData.items.filter(i => i.showId === sid && !i.missing)
-    .sort((a, b) => (a.info.season - b.info.season) || (a.info.episode - b.info.episode));
-  const seasons = [...new Set(eps.map(e => e.info.season))];
+    .sort((a, b) => (seasonOrder(a.info.season) - seasonOrder(b.info.season)) || ((a.info.episode || 0) - (b.info.episode || 0)));
+  const seasons = [...new Set(eps.map(e => e.info.season || 0))];
   const i = sh.info;
   const meta = [i.year, `${seasons.length} season${seasons.length === 1 ? '' : 's'}`, `${eps.length} episode${eps.length === 1 ? '' : 's'}`, genresOf(i.genres).join(', ')].filter(Boolean);
   open(`
@@ -569,8 +571,8 @@ function showDetail(sid) {
         ${i.summary ? `<p class="sum">${esc(i.summary)}</p>` : ''}
       </div>
     </div>
-    <div class="seasons">${seasons.map(n => `<h4>Season ${n}</h4>` + eps.filter(e => e.info.season === n).map(x =>
-      `<div class="ep"><span class="ck" title="${x.watched ? 'Watched' : ''}">${x.watched ? '✓' : ''}</span><span class="n">E${x.info.episode}</span><span class="x">${esc(x.info.epTitle || x.info.title || '')}</span>
+    <div class="seasons">${seasons.map(n => `<h4>${n ? 'Season ' + n : 'Specials'}</h4>` + eps.filter(e => (e.info.season || 0) === n).map(x =>
+      `<div class="ep"><span class="ck" title="${x.watched ? 'Watched' : ''}">${x.watched ? '✓' : ''}</span><span class="n">E${x.info.episode || 0}</span><span class="x">${esc(x.info.epTitle || x.info.title || '')}</span>
         ${progOf(x) ? `<span class="bar2" title="${fmtTime(x.pos)}"><div style="width:${progOf(x) * 100}%"></div></span>` : ''}
         ${x.fmt ? `<span class="hint hide-sm">${esc(x.fmt)}</span>` : ''}<button class="small" data-epd="${x.id}">Details</button>
         <button class="small primary play" data-epw="${x.id}" title="Watch">▶</button></div>`).join('')).join('')}</div>
@@ -741,7 +743,7 @@ function itemDialog(id) {
 function showDialog(sid) {
   const sh = libData.shows.find(x => x.id === sid); if (!sh) return;
   const eps = libData.items.filter(i => i.showId === sid && !i.missing)
-    .sort((a, b) => (a.info.season - b.info.season) || (a.info.episode - b.info.episode));
+    .sort((a, b) => (seasonOrder(a.info.season) - seasonOrder(b.info.season)) || ((a.info.episode || 0) - (b.info.episode || 0)));
   const d = sh.detected, e = sh.edit;
   const art = sh.poster ? `background-image:url('/api/shows/${sid}/poster?w=340&h=486&v=${bust}')` : '';
   open(`
@@ -757,7 +759,7 @@ function showDialog(sid) {
         <div class="hint">To move an episode to another show, edit the episode's Show field.</div>
       </div>
     </div>
-    <div class="eps">${eps.map(x => `<div class="ep"><span class="n">S${x.info.season}·E${x.info.episode}</span>
+    <div class="eps">${eps.map(x => `<div class="ep"><span class="n">S${x.info.season || 0}·E${x.info.episode || 0}</span>
       <span class="x">${esc(x.info.epTitle || x.info.title || '')}</span><button class="small" data-ep="${x.id}">Edit</button></div>`).join('')}</div>
     <div class="err" id="serr"></div>
     <div class="actions"><button id="scancel">Close</button><button class="primary" id="ssave">Save show</button></div>`);
@@ -887,7 +889,7 @@ async function watch(id, at) {
   const it = libData.items.find(x => x.id === id);
   P.id = id; P.ended = false; P.audioN = -1; P.cues = []; $('#pcc').classList.remove('on');
   $('#player').hidden = false; document.body.style.overflow = 'hidden';
-  $('#ptitle').textContent = it ? (it.showId ? `${it.info.show} · S${it.info.season}E${it.info.episode} ${it.info.epTitle || ''}` : it.info.title) : '';
+  $('#ptitle').textContent = it ? (it.showId ? `${it.info.show} · S${it.info.season || 0}E${it.info.episode || 0} ${it.info.epTitle || ''}` : it.info.title) : '';
   pv.volume = +lsGet('bt.vol', 1); $('#pvol').value = pv.volume;
   if (at < 0) { // resume if this browser stopped part-way
     at = 0;
@@ -1081,11 +1083,11 @@ function nextEpisode() {
   const it = libData.items.find(x => x.id === P.id);
   if (!it || !it.showId) return;
   const eps = libData.items.filter(i => i.showId === it.showId && !i.missing)
-    .sort((a, b) => (a.info.season - b.info.season) || (a.info.episode - b.info.episode));
+    .sort((a, b) => (seasonOrder(a.info.season) - seasonOrder(b.info.season)) || ((a.info.episode || 0) - (b.info.episode || 0)));
   const nx = eps[eps.findIndex(e => e.id === it.id) + 1];
   if (!nx) return;
   let n = 8;
-  const show = () => msg(`Next: S${nx.info.season}E${nx.info.episode} ${esc(nx.info.epTitle || '')} in ${n} s<br><br>
+  const show = () => msg(`Next: S${nx.info.season || 0}E${nx.info.episode || 0} ${esc(nx.info.epTitle || '')} in ${n} s<br><br>
     <button class="pbtn" id="pnext">Play now</button> <button class="pbtn" id="pstay">Cancel</button>`);
   show();
   const t = setInterval(() => { if (--n <= 0) go(); else show(), bind(); }, 1000);

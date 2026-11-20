@@ -307,19 +307,36 @@ func (sc *Scanner) identify(it *library.Item) {
 	}
 	if sup != nil {
 		source = "super"
-		if strings.EqualFold(sup.Field("category"), "TV Shows") || p.IsEpisode() {
+		// What the file is: its own kind= (Moflex Studio 1.7+) decides; a file from before that is
+		// an episode when its shelf is TV Shows or its name says SxxEyy.
+		kind := strings.ToLower(sup.Field("kind"))
+		isEp := kind == "episode" || (kind == "" && (strings.EqualFold(sup.Field("category"), "TV Shows") || p.IsEpisode()))
+		if isEp {
+			if !p.IsEpisode() { // the name says nothing (renamed): the file's own info is all there is
+				det = library.Info{Is3D: det.Is3D}
+			}
 			if t := sup.Field("title"); t != "" {
 				det.Show = t
 			}
 			if y := sup.Int("year"); y != 0 {
 				det.ShowYear = y
 			}
+			// season / episode / episode title: the file's own fields beat its name
+			// (season 0 = the show's specials, episode 0 = a season's special)
+			_, hs := sup.Info["season"]
+			_, he := sup.Info["episode"]
+			if hs && he {
+				det.Season, det.Episode = sup.Int("season"), sup.Int("episode")
+			}
+			if et := sup.Field("eptitle"); et != "" {
+				det.EpTitle, det.Title = et, et
+			}
 			if d := sup.Field("desc"); d != "" {
 				det.Summary = d
 				// the summary starts "S1.E2 “Title” -": the episode, even when the file name lost it
 				if se, ep, title, rest, ok := moflex.EpisodeFromDesc(d); ok {
 					det.Summary = rest
-					if det.Episode == 0 {
+					if det.Season == 0 && det.Episode == 0 {
 						det.Season, det.Episode = se, ep
 					}
 					if det.EpTitle == "" && title != "" {
@@ -329,6 +346,13 @@ func (sc *Scanner) identify(it *library.Item) {
 			}
 			showDesc = sup.Field("showdesc")
 		} else {
+			if p.IsEpisode() { // SxxEyy in the name, but the file says it is a film / short / music video
+				det = library.Info{Title: p.Title, Year: p.Year, Is3D: det.Is3D}
+			}
+			switch kind {
+			case "short", "musicvideo", "movie":
+				det.Kind = kind
+			}
 			if t := sup.Field("title"); t != "" {
 				det.Title = t
 			}

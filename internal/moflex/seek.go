@@ -47,7 +47,7 @@ func syncAt(r io.ReaderAt, size, off int64) (int64, int64, bool) {
 // Duration is the time of the last sync block (0 when none is found near the end). It reads the
 // end of the file once (a larger piece only if that holds no sync block).
 func Duration(r io.ReaderAt, size int64) int64 {
-	for back := int64(1 << 20); back <= 16<<20; back *= 4 {
+	for back := int64(1 << 20); back <= 64<<20; back *= 4 { // up to 64 MB: audio outlasting the video ends a file with blocks that have no sync
 		from := size - back
 		if from < 0 {
 			from = 0

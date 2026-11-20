@@ -317,7 +317,7 @@ func (s *Server) episodes(sid, client string) []*library.Item {
 	sort.Slice(eps, func(i, j int) bool {
 		a, b := eps[i].Info(), eps[j].Info()
 		if a.Season != b.Season {
-			return a.Season < b.Season
+			return seasonOrder(a.Season) < seasonOrder(b.Season)
 		}
 		return a.Episode < b.Episode
 	})
@@ -343,7 +343,7 @@ func (s *Server) apiShow(w http.ResponseWriter, r *http.Request) {
 		n := it.Info().Season
 		if len(seasons) == 0 || seasons[len(seasons)-1].Season != n {
 			seasons = append(seasons, Entry{Type: "season", ID: sid + "/" + strconv.Itoa(n),
-				Title: "Season " + strconv.Itoa(n), Season: n, Poster: show.Poster, Summary: clip(show.Summary, 400)})
+				Title: seasonTitle(n), Season: n, Poster: show.Poster, Summary: clip(show.Summary, 400)})
 		}
 		x := &seasons[len(seasons)-1]
 		x.Episodes++
@@ -352,6 +352,23 @@ func (s *Server) apiShow(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, map[string]any{"show": show, "seasons": seasons})
+}
+
+// seasonOrder puts season 0 (the specials) after the numbered seasons, as the 3DS player does,
+// so a show starts at S01E01 and plays straight through before its specials.
+func seasonOrder(n int) int {
+	if n == 0 {
+		return 1 << 30
+	}
+	return n
+}
+
+// seasonTitle: season 0 holds the specials.
+func seasonTitle(n int) string {
+	if n == 0 {
+		return "Specials"
+	}
+	return "Season " + strconv.Itoa(n)
 }
 
 // A season: its episodes.

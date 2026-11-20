@@ -11,14 +11,17 @@ import (
 type Parsed struct {
 	Title   string // movie title, or the show's title for an episode
 	Year    int
-	Season  int // > 0 for an episode
-	Episode int
+	Season  int
+	Episode int  // 0 is a special ("S04E00"), as is season 0 ("S00E05")
+	Marked  bool // the name had an episode marker (S01E02, 1x02, 1-02)
 	EpTitle string
 	Is3D    int // 1 = the name says 3D, 0 = says nothing
 	Layout  string
 }
 
-func (p Parsed) IsEpisode() bool { return p.Season > 0 && p.Episode > 0 }
+// IsEpisode: the name marks an episode. Episode 0 (S04E00) and season 0 (S00E05) are specials,
+// still episodes of the show; only "S00E00" says nothing.
+func (p Parsed) IsEpisode() bool { return p.Marked && (p.Season > 0 || p.Episode > 0) }
 
 var (
 	// what the moflex encoder appends: " Lrf Full Sbs_400x240_1400kbps_23.976fps_2pass"
@@ -53,6 +56,7 @@ func ParseName(path string) Parsed {
 	if m := firstMatch(name, reSE, reNxNN, reDashNum); m != nil {
 		p.Season, _ = strconv.Atoi(name[m[2]:m[3]])
 		p.Episode, _ = strconv.Atoi(name[m[4]:m[5]])
+		p.Marked = true
 		show, rest := name[:m[0]], name[m[1]:]
 		p.Title, p.Year = titleYear(show)
 		p.EpTitle = clean(rest)
