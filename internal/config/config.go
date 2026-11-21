@@ -104,5 +104,5 @@ func (c *Config) Update(f func(*Config)) error {
 func (c *Config) Snapshot() Config {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return Config{Name: c.Name, ID: c.ID, Port: c.Port, AllowRemoteAdmin: c.AllowRemoteAdmin}
+	return Config{Name: c.Name, ID: c.ID, Port: c.Port, AllowRemoteAdmin: c.AllowRemoteAdmin, FastMoflex: c.FastMoflex}
 }
