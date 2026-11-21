@@ -186,12 +186,12 @@ func MoflexArgs(j Job, layout string, q int) []string {
 // seconds of video encoded per second of work (2 = twice as fast as it plays). It encodes durMs
 // of the video (the encoder's own start-up counted, so it errs low) and throws the result away;
 // a run still going at limit stops there and counts what it had to do.
-func (t *Tool) MoflexSpeed(ctx context.Context, j Job, layout string, durMs int64, limit time.Duration) (float64, error) {
+func (t *Tool) MoflexSpeed(ctx context.Context, j Job, layout string, durMs int64, limit time.Duration, fast bool) (float64, error) {
 	j.DurMs = durMs
 	ctx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
 	t0 := time.Now()
-	err := t.TranscodeMoflex(ctx, j, layout, 0, io.Discard)
+	err := t.transcodeMoflex(ctx, j, layout, 0, io.Discard, fast)
 	el := time.Since(t0)
 	if err != nil {
 		return 0, err
@@ -237,6 +237,10 @@ var moflexAQ = []string{"MOBI_AQ=1", "MOBI_AQ_OFFSET=4.0"}
 
 // TranscodeMoflex runs a live moflex job, writing to w until it ends or ctx is cancelled.
 func (t *Tool) TranscodeMoflex(ctx context.Context, j Job, layout string, q int, w io.Writer) error {
+	return t.transcodeMoflex(ctx, j, layout, q, w, t.FastMoflex())
+}
+
+func (t *Tool) transcodeMoflex(ctx context.Context, j Job, layout string, q int, w io.Writer, fast bool) error {
 	enc := t.MoflexEncoder()
 	if enc == "" {
 		return errors.New("the moflex encoder isn't installed")
@@ -245,7 +249,7 @@ func (t *Tool) TranscodeMoflex(ctx context.Context, j Job, layout string, q int,
 	hideWindow(cmd)
 	playbackPriority(cmd)
 	cmd.Env = append(os.Environ(), moflexEnv...)
-	if t.FastMoflex() {
+	if fast {
 		cmd.Env = append(cmd.Env, moflexFastSubme)
 	} else {
 		cmd.Env = append(cmd.Env, moflexSubme)

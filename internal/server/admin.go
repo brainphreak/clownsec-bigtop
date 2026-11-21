@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log"
@@ -125,7 +126,7 @@ func (s *Server) adState(w http.ResponseWriter, r *http.Request) {
 	s.Store.RUnlock()
 	writeJSON(w, map[string]any{
 		"name": c.Name, "id": c.ID, "port": c.Port, "allowRemoteAdmin": c.AllowRemoteAdmin,
-		"fastMoflex": c.FastMoflex, "version": s.Version, "addresses": lanAddresses(c.Port), "libraries": libs,
+		"encodeMode": c.Mode(), "useFast": c.UseFast(), "auto3d": c.Auto3D, "version": s.Version, "addresses": lanAddresses(c.Port), "libraries": libs,
 		"scan": s.Scanner.Status(), "catalog": map[string]int{"movies": cm, "shows": cs},
 		"update": s.Updater.Status(), "ffmpeg": s.Media.Status(),
 	})
@@ -188,7 +189,8 @@ func (s *Server) adSettings(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Name             *string `json:"name"`
 		AllowRemoteAdmin *bool   `json:"allowRemoteAdmin"`
-		FastMoflex       *bool   `json:"fastMoflex"`
+		FastMoflex       *bool   `json:"fastMoflex"` // before encodeMode: true = "fast"
+		EncodeMode       *string `json:"encodeMode"`
 	}
 	if err := readJSON(r, &in); err != nil {
 		bad(w, err.Error())
@@ -202,11 +204,16 @@ func (s *Server) adSettings(w http.ResponseWriter, r *http.Request) {
 			c.AllowRemoteAdmin = *in.AllowRemoteAdmin
 		}
 		if in.FastMoflex != nil {
-			c.FastMoflex = *in.FastMoflex
+			c.EncodeMode = map[bool]string{true: "fast", false: "best"}[*in.FastMoflex]
 		}
+		if in.EncodeMode != nil && (*in.EncodeMode == "auto" || *in.EncodeMode == "best" || *in.EncodeMode == "fast") {
+			c.EncodeMode = *in.EncodeMode
+		}
+		c.FastMoflex = false // EncodeMode says it now
 	})
-	if in.FastMoflex != nil && err == nil {
-		s.Media.SetFastMoflex(*in.FastMoflex)
+	if err == nil {
+		c := s.Cfg.Snapshot()
+		s.Media.SetFastMoflex(c.UseFast())
 	}
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -387,17 +394,62 @@ func (s *Server) adSpeedTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	j := media.Job{Path: path, Media: m, Audio: -1, Burn: -1}
-	out := map[string]any{"seconds": media.SpeedClipMs / 1000, "fast": s.Media.FastMoflex()}
-	for _, run := range []struct{ key, layout string }{{"speed2d", ""}, {"speed3d", "hsbs"}} {
-		v, err := s.Media.MoflexSpeed(r.Context(), j, run.layout, media.SpeedClipMs, 60*time.Second)
+	out := map[string]any{"seconds": media.SpeedClipMs / 1000}
+	for _, run := range []struct {
+		key, layout string
+		fast        bool
+	}{{"speed2d", "", false}, {"speed3d", "hsbs", false}, {"fast2d", "", true}, {"fast3d", "hsbs", true}} {
+		v, err := s.Media.MoflexSpeed(r.Context(), j, run.layout, media.SpeedClipMs, 60*time.Second, run.fast)
 		if err != nil {
 			bad(w, "The test encode failed: "+err.Error())
 			return
 		}
 		out[run.key] = v
 	}
-	log.Printf("speed test (fast %v): moflex 2D %.2fx, 3D %.2fx real time", out["fast"], out["speed2d"], out["speed3d"])
+	s.setAuto(out["speed3d"].(float64)) // the same measurement Auto makes
+	c := s.Cfg.Snapshot()
+	out["mode"], out["useFast"] = c.Mode(), c.UseFast()
+	log.Printf("speed test: best quality 2D %.2fx 3D %.2fx, fast 2D %.2fx 3D %.2fx real time",
+		out["speed2d"], out["speed3d"], out["fast2d"], out["fast3d"])
 	writeJSON(w, out)
+}
+
+// setAuto: remember Auto's measurement (best-quality 3D speed) and apply what it decides.
+func (s *Server) setAuto(speed3d float64) {
+	s.Cfg.Update(func(c *config.Config) { c.Auto3D, c.AutoVer = speed3d, s.Version })
+	c := s.Cfg.Snapshot()
+	s.Media.SetFastMoflex(c.UseFast())
+}
+
+// AutoMeasure: in Auto, measure this computer once per Big Top version (an update can change the
+// encoder), after a quiet start: best-quality 3D on the built-in clip, ~20 s of encoding.
+func (s *Server) AutoMeasure(wait time.Duration) {
+	c := s.Cfg.Snapshot()
+	if c.Mode() != "auto" || (c.Auto3D > 0 && c.AutoVer == s.Version) {
+		return
+	}
+	time.Sleep(wait)
+	if c = s.Cfg.Snapshot(); s.Media.MoflexEncoder() == "" || c.Mode() != "auto" {
+		return
+	}
+	path, err := s.Media.SpeedClip()
+	if err != nil {
+		return
+	}
+	m, err := s.Media.Probe(path)
+	if err != nil {
+		log.Printf("auto encoding: can't read the test clip: %v", err)
+		return
+	}
+	j := media.Job{Path: path, Media: m, Audio: -1, Burn: -1}
+	v, err := s.Media.MoflexSpeed(context.Background(), j, "hsbs", media.SpeedClipMs, 60*time.Second, false)
+	if err != nil {
+		log.Printf("auto encoding: the test encode failed: %v", err)
+		return
+	}
+	s.setAuto(v)
+	log.Printf("auto encoding: 3D at best quality %.2fx real time -> %s", v,
+		map[bool]string{true: "Fast", false: "Best quality"}[s.Media.FastMoflex()])
 }
 
 func (s *Server) adScan(w http.ResponseWriter, r *http.Request) {

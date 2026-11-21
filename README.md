@@ -522,10 +522,15 @@ The encoder has to make the moflex faster than the 3DS plays it, or the video st
 eyes) is about twice the work of 2D. **Settings → Old 3DS speed → test this computer** encodes a
 built-in 20-second 3D clip in 2D and in 3D and says how much faster than real time this computer
 is: 1.3× or more plays smoothly, 1.0–1.3× may stutter in busy scenes, under 1× stutters. If only 3D
-is too slow, turn on **Fast encoding for an Old 3DS** (same Settings page): 2–3× as fast, with
-slightly softer detail. If 3D is still too slow, play 3D videos in 2D on the Old 3DS (the player's
-VIDEO → Format). A New 3DS gets H.264 and isn't affected. For comparison, an Apple M4 Mac measures
-about 5.3× in 2D and 2.1× in 3D, and with Fast encoding 11.6× and 5.2×.
+is too slow, use **Fast** encoding. **Encoding for an Old 3DS** (same Settings page) is **Auto** by
+default: a minute or two after Big Top starts (and after each update) it measures this computer once and
+uses Best quality only when 3D encodes at 1.3× or faster, otherwise Fast (2–3× as fast, slightly softer
+detail). If even Fast is too slow for 3D, play 3D videos in 2D on the Old 3DS (the player's VIDEO →
+Format). A New 3DS gets H.264 and isn't affected. For comparison, an Apple M4 Mac measures about 4.9× in
+2D and 3.4× in 3D at best quality, and 10× and 5× with Fast.
+
+The 3DS player's **Big Top server → Test connection** checks the other half: how fast and how steadily
+this computer's data reaches the 3DS over Wi-Fi (a 3D stream averages about 150–250 KB/s).
 
 The clip is from *Big Buck Bunny* (stereoscopic edition), © copyright 2008 Blender Foundation /
 [www.bigbuckbunny.org](https://www.bigbuckbunny.org), licensed under

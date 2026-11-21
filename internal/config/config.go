@@ -25,7 +25,38 @@ type Config struct {
 	ID               string `json:"id"`   // stable: the 3DS keys its settings by it
 	Port             int    `json:"port"`
 	AllowRemoteAdmin bool   `json:"allowRemoteAdmin"`     // the setup page from other computers (off: this PC only)
-	FastMoflex       bool   `json:"fastMoflex,omitempty"` // Old 3DS streams: the faster motion search (slower computers)
+	FastMoflex       bool   `json:"fastMoflex,omitempty"` // before EncodeMode: Fast ticked (read as EncodeMode "fast")
+	// Old 3DS streams: "auto" (default: Best quality if this computer manages 3D at AutoMinSpeed
+	// or faster, else Fast), "best", or "fast" (the faster motion search, for slower computers)
+	EncodeMode string  `json:"encodeMode,omitempty"`
+	Auto3D     float64 `json:"auto3d,omitempty"`  // Auto's measurement: best-quality 3D, x real time
+	AutoVer    string  `json:"autoVer,omitempty"` // the Big Top version that measured it (an update measures again)
+}
+
+// AutoMinSpeed: Auto picks Best quality when 3D encodes at least this much faster than it plays.
+const AutoMinSpeed = 1.3
+
+// Mode: the encoding setting, "auto" when nothing was chosen (or an old "fast" tick).
+func (c *Config) Mode() string {
+	switch c.EncodeMode {
+	case "auto", "best", "fast":
+		return c.EncodeMode
+	}
+	if c.FastMoflex {
+		return "fast"
+	}
+	return "auto"
+}
+
+// UseFast: whether Old 3DS streams use Fast encoding now. Auto plays safe (Fast) until measured.
+func (c *Config) UseFast() bool {
+	switch c.Mode() {
+	case "best":
+		return false
+	case "fast":
+		return true
+	}
+	return c.Auto3D < AutoMinSpeed
 }
 
 // DataDir is %APPDATA%\Clownsec Big Top on Windows, ~/Library/Application Support/Clownsec Big Top
@@ -104,5 +135,6 @@ func (c *Config) Update(f func(*Config)) error {
 func (c *Config) Snapshot() Config {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return Config{Name: c.Name, ID: c.ID, Port: c.Port, AllowRemoteAdmin: c.AllowRemoteAdmin, FastMoflex: c.FastMoflex}
+	return Config{Name: c.Name, ID: c.ID, Port: c.Port, AllowRemoteAdmin: c.AllowRemoteAdmin, FastMoflex: c.FastMoflex,
+		EncodeMode: c.EncodeMode, Auto3D: c.Auto3D, AutoVer: c.AutoVer}
 }

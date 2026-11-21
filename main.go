@@ -66,7 +66,8 @@ func main() {
 		log.Printf("Clownsec catalog not available yet (%v); matching by file name", err)
 	}
 	ff := media.New(dir)
-	ff.SetFastMoflex(cfg.Snapshot().FastMoflex)
+	snap := cfg.Snapshot()
+	ff.SetFastMoflex(snap.UseFast())
 	sc := &scan.Scanner{Store: store, Catalog: cat, Posters: posters, Media: ff, DataDir: dir}
 	upd := update.New(version)
 	srv := &server.Server{Cfg: cfg, Store: store, Scanner: sc, Posters: posters, Catalog: cat, Version: version,
@@ -121,6 +122,7 @@ func main() {
 	if *replaces != "" {
 		go update.Cleanup(*replaces)
 	}
+	go srv.AutoMeasure(90 * time.Second) // Auto encoding: this computer's speed, once per version
 	if version != "dev" {
 		go upd.Loop(func(st update.Status) {
 			log.Printf("Big Top %s is available -- open the setup page to update.", st.Latest)
