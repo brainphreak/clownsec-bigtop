@@ -19,10 +19,11 @@ type Job struct {
 	Path    string
 	Media   *library.Media
 	StartMs int64
-	Stereo  bool // the player wants a 3D-sized frame (side-by-side source): up to 800x480, not 400x240
-	Audio   int  // ffmpeg stream index of the audio track (-1 = the file's default)
-	Burn    int  // ffmpeg stream index of a subtitle to burn into the picture (-1 = none)
-	Kbps    int  // video bitrate (0 = the default for the size)
+	Stereo  bool  // the player wants a 3D-sized frame (side-by-side source): up to 800x480, not 400x240
+	Audio   int   // ffmpeg stream index of the audio track (-1 = the file's default)
+	Burn    int   // ffmpeg stream index of a subtitle to burn into the picture (-1 = none)
+	Kbps    int   // video bitrate (0 = the default for the size)
+	DurMs   int64 // stop after this much video (0 = to the end); the speed test
 }
 
 // Size is the frame the 3DS gets: the source's shape (its pixel aspect applied), shrunk to fit

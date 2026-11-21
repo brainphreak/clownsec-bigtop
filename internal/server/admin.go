@@ -17,6 +17,7 @@ import (
 	"github.com/brainphreak/clownsec-bigtop/internal/catalog"
 	"github.com/brainphreak/clownsec-bigtop/internal/config"
 	"github.com/brainphreak/clownsec-bigtop/internal/library"
+	"github.com/brainphreak/clownsec-bigtop/internal/media"
 	"github.com/brainphreak/clownsec-bigtop/web"
 )
 
@@ -48,6 +49,7 @@ func (s *Server) adminRoutes(m *http.ServeMux) {
 	a("POST /admin/api/update", s.adUpdate)
 	a("POST /admin/api/quit", s.adQuit)
 	a("POST /admin/api/ffmpeg/download", s.adFFmpegDownload)
+	a("POST /admin/api/speedtest", s.adSpeedTest)
 	// the page shows posters through the same URLs the 3DS uses
 }
 
@@ -356,6 +358,39 @@ func (s *Server) adBrowse(w http.ResponseWriter, r *http.Request) {
 		parent = ""
 	}
 	writeJSON(w, map[string]any{"path": p, "parent": parent, "dirs": dirs, "videos": videos})
+}
+
+// Speed test: can this computer encode the Old 3DS's live moflex stream faster than it plays?
+// The built-in clip (20 s of Big Buck Bunny, 1080p half side-by-side, like a 3D rip) encoded
+// in 2D and in 3D (two eyes: about twice the work), timed. The same clip everywhere, so results
+// compare between computers.
+func (s *Server) adSpeedTest(w http.ResponseWriter, r *http.Request) {
+	if s.Media.MoflexEncoder() == "" {
+		bad(w, "The moflex encoder isn't available on this computer.")
+		return
+	}
+	path, err := s.Media.SpeedClip()
+	if err != nil {
+		bad(w, "Couldn't write the test clip: "+err.Error())
+		return
+	}
+	m, err := s.Media.Probe(path)
+	if err != nil {
+		bad(w, "Couldn't read the test clip: "+err.Error())
+		return
+	}
+	j := media.Job{Path: path, Media: m, Audio: -1, Burn: -1}
+	out := map[string]any{"seconds": media.SpeedClipMs / 1000}
+	for _, run := range []struct{ key, layout string }{{"speed2d", ""}, {"speed3d", "hsbs"}} {
+		v, err := s.Media.MoflexSpeed(r.Context(), j, run.layout, media.SpeedClipMs, 60*time.Second)
+		if err != nil {
+			bad(w, "The test encode failed: "+err.Error())
+			return
+		}
+		out[run.key] = v
+	}
+	log.Printf("speed test: moflex 2D %.2fx, 3D %.2fx real time", out["speed2d"], out["speed3d"])
+	writeJSON(w, out)
 }
 
 func (s *Server) adScan(w http.ResponseWriter, r *http.Request) {

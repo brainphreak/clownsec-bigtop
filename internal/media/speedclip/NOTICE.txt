@@ -1,0 +1,7 @@
+speedtest-hsbs.mp4: 20 seconds (from 3:20) of Big Buck Bunny, the stereoscopic edition
+(bbb_sunflower_1080p_30fps_stereo_abl.mp4), made half side-by-side at 23.976 fps for Big Top's
+encoding speed test.
+
+Big Buck Bunny (c) copyright 2008, Blender Foundation / www.bigbuckbunny.org
+Licensed under the Creative Commons Attribution 3.0 license:
+https://creativecommons.org/licenses/by/3.0/

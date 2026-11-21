@@ -792,6 +792,10 @@ function settingsDialog() {
       by Movie Bot, with
       <a href="https://github.com/brainphreak/clownsec-moflex-encoder/tree/main/patches" target="_blank" rel="noopener" style="color:var(--accent2)">Clownsec's improvements</a>
       (FFmpeg + x264, GPL).</p>
+    <p class="hint">Old 3DS speed: an Old 3DS gets MP4/MKV/AVI as moflex this computer makes while it plays, so
+      the computer has to make it faster than it plays.
+      <a href="#" id="spdtest" style="color:var(--accent2)">test this computer</a> (about a minute)<br>
+      <span id="spdres"></span></p>
     <p class="hint">Clownsec catalog: ${state.catalog.movies} movies, ${state.catalog.shows} shows ·
       <a href="#" id="refresh" style="color:var(--accent2)">re-read every file's info</a></p>
     <div class="err" id="xerr"></div>
@@ -803,6 +807,19 @@ function settingsDialog() {
           $('#updres').textContent = u.available ? ` — ${u.latest} is available (see the bar at the top)` : ' — this is the latest version';
           await loadState(); }
     catch (x) { $('#updres').textContent = ' — ' + x.message; }
+  };
+  $('#spdtest').onclick = async ev => {
+    ev.preventDefault();
+    const res = $('#spdres');
+    res.textContent = 'Testing… (encoding a 20-second 3D clip in 2D, then in 3D)';
+    try {
+      const t = await api('POST', '/admin/api/speedtest');
+      const say = v => v >= 1.3 ? 'plays smoothly' : v >= 1.0 ? 'borderline: busy scenes may stutter' : 'too slow: it will stutter';
+      const x = v => v.toFixed(1) + '× real time';
+      res.textContent = `2D: ${x(t.speed2d)}, ${say(t.speed2d)}. 3D: ${x(t.speed3d)}, ${say(t.speed3d)}.` +
+        (t.speed3d < 1.0 && t.speed2d >= 1.0 ? ' Play 3D videos in 2D on an Old 3DS (VIDEO > Format).' : '') +
+        ' (Test clip: Big Buck Bunny, © Blender Foundation, CC BY 3.0.)';
+    } catch (x) { res.textContent = x.message; }
   };
   $('#refresh').onclick = async ev => { ev.preventDefault(); await api('POST', '/admin/api/scan?refresh=1'); close(); poll(); };
   $('#xsave').onclick = async () => {

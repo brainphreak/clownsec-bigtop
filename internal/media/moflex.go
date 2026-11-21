@@ -176,7 +176,30 @@ func MoflexArgs(j Job, layout string, q int) []string {
 	if audio >= 0 {
 		a = append(a, "-c:a", "pcm_s16le", "-ar", "44100", "-ac", "2", "-mo_audio", "adpcm")
 	}
+	if j.DurMs > 0 {
+		a = append(a, "-t", fmt.Sprintf("%.3f", float64(j.DurMs)/1000))
+	}
 	return append(a, "-mo_live", "1", "-f", "moflex", "pipe:1")
+}
+
+// MoflexSpeed: how fast this computer encodes the live moflex stream an Old 3DS plays -- the
+// seconds of video encoded per second of work (2 = twice as fast as it plays). It encodes durMs
+// of the video (the encoder's own start-up counted, so it errs low) and throws the result away;
+// a run still going at limit stops there and counts what it had to do.
+func (t *Tool) MoflexSpeed(ctx context.Context, j Job, layout string, durMs int64, limit time.Duration) (float64, error) {
+	j.DurMs = durMs
+	ctx, cancel := context.WithTimeout(ctx, limit)
+	defer cancel()
+	t0 := time.Now()
+	err := t.TranscodeMoflex(ctx, j, layout, 0, io.Discard)
+	el := time.Since(t0)
+	if err != nil {
+		return 0, err
+	}
+	if ctx.Err() != nil {
+		el = limit // not done in time: at most this fast
+	}
+	return float64(durMs) / 1000 / el.Seconds(), nil
 }
 
 // moflexEnv: the encoder's tuning, set through its environment -- the 8x8 luma transform, 4x4 chroma
