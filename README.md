@@ -516,6 +516,19 @@ is at the links above.
 
 The browser player uses [hls.js](https://github.com/video-dev/hls.js) (Apache-2.0), built in.
 
+### Is this computer fast enough for an Old 3DS?
+
+The encoder has to make the moflex faster than the 3DS plays it, or the video stutters, and 3D (two
+eyes) is about twice the work of 2D. **Settings → Old 3DS speed → test this computer** encodes a
+built-in 20-second 3D clip in 2D and in 3D and says how much faster than real time this computer
+is: 1.3× or more plays smoothly, 1.0–1.3× may stutter in busy scenes, under 1× stutters. If only 3D
+is too slow, play 3D videos in 2D on the Old 3DS (the player's VIDEO → Format). A New 3DS gets
+H.264 and isn't affected. For comparison, an Apple M4 Mac measures about 3.8× in 2D and 1.5× in 3D.
+
+The clip is from *Big Buck Bunny* (stereoscopic edition), © copyright 2008 Blender Foundation /
+[www.bigbuckbunny.org](https://www.bigbuckbunny.org), licensed under
+[CC BY 3.0](https://creativecommons.org/licenses/by/3.0/).
+
 ---
 
 ## License
