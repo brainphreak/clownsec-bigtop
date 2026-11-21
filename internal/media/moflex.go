@@ -253,6 +253,11 @@ func (t *Tool) TranscodeMoflex(ctx context.Context, j Job, layout string, q int,
 	if q < 12 || q > 59 {
 		cmd.Env = append(cmd.Env, moflexAQ...)
 	}
+	if layout == "hsbs" || layout == "fsbs" {
+		// 3D: each eye on its own encoder and core, referencing only its own pictures -- about
+		// 2.3x as fast and a third smaller than one encoder for both (see the encoder patch notes)
+		cmd.Env = append(cmd.Env, "MOBI_DUAL_EYES=1")
+	}
 	cmd.Stdout = w
 	var stderr bytes.Buffer
 	cmd.Stderr = &limited{&stderr, 4096}
