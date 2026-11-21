@@ -276,6 +276,9 @@ func (s *Server) apiLibrary(w http.ResponseWriter, r *http.Request) {
 			shows[sid] = e
 		}
 		e.Episodes++
+		if library.Stereo3D(it.Info().Is3D) {
+			e.Is3D = true // a show is 3D when its episodes are (any of them)
+		}
 		if p := s.Store.DB.Progress[client][it.ID]; p != nil && p.Watched {
 			e.Seen++
 		}
@@ -347,6 +350,9 @@ func (s *Server) apiShow(w http.ResponseWriter, r *http.Request) {
 		}
 		x := &seasons[len(seasons)-1]
 		x.Episodes++
+		if library.Stereo3D(it.Info().Is3D) {
+			x.Is3D, show.Is3D = true, true
+		}
 		if p := s.Store.DB.Progress[client][it.ID]; p != nil && p.Watched {
 			x.Seen++
 		}
