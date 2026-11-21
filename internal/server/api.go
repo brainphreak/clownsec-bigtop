@@ -39,6 +39,7 @@ func (s *Server) Handler() http.Handler {
 	m := http.NewServeMux()
 	// ---- the 3DS ----
 	m.HandleFunc("GET /api/server", s.apiServer)
+	m.HandleFunc("GET /api/nettest", s.apiNetTest)
 	m.HandleFunc("GET /api/libraries", s.apiLibraries)
 	m.HandleFunc("GET /api/libraries/{id}", s.apiLibrary)
 	m.HandleFunc("GET /api/shows/{id}", s.apiShow)
@@ -202,6 +203,39 @@ func writeJSON(w http.ResponseWriter, v any) {
 func (s *Server) apiServer(w http.ResponseWriter, r *http.Request) {
 	c := s.Cfg.Snapshot()
 	writeJSON(w, map[string]any{"service": "clownsec-bigtop", "name": c.Name, "id": c.ID, "version": s.Version})
+}
+
+// GET /api/nettest?kb=n: n KB (at most 32 MB, default 4 MB) of data that doesn't compress, for the
+// 3DS's connection test -- how fast and how steadily this computer's data reaches it over Wi-Fi.
+func (s *Server) apiNetTest(w http.ResponseWriter, r *http.Request) {
+	kb, _ := strconv.Atoi(r.URL.Query().Get("kb"))
+	if kb <= 0 {
+		kb = 4096
+	}
+	if kb > 32768 {
+		kb = 32768
+	}
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Length", strconv.Itoa(kb*1024))
+	w.Header().Set("Cache-Control", "no-store")
+	buf := make([]byte, 64*1024)
+	x := uint32(2463534242)
+	for i := 0; i+4 <= len(buf); i += 4 { // xorshift: noise, so nothing on the way can shrink it
+		x ^= x << 13
+		x ^= x >> 17
+		x ^= x << 5
+		buf[i], buf[i+1], buf[i+2], buf[i+3] = byte(x), byte(x>>8), byte(x>>16), byte(x>>24)
+	}
+	for left := kb * 1024; left > 0; {
+		n := len(buf)
+		if n > left {
+			n = left
+		}
+		if _, err := w.Write(buf[:n]); err != nil {
+			return
+		}
+		left -= n
+	}
 }
 
 func (s *Server) apiLibraries(w http.ResponseWriter, r *http.Request) {
