@@ -7,7 +7,7 @@
 # the AppImage runtime once into .cache/. The updater checks every download against SHA256SUMS.txt.
 set -e
 cd "$(dirname "$0")"
-export GOCACHE="$PWD/.gocache" CGO_ENABLED=0
+export GOCACHE="${GOCACHE:-$PWD/.gocache}" CGO_ENABLED=0
 VERSION=${VERSION:-$(date +%y%m%d.%H%M)}
 # symbols kept (no -s -w): antivirus software treats stripped Go binaries as suspicious
 LDFLAGS="-X main.version=$VERSION"
