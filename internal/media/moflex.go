@@ -243,6 +243,7 @@ func (t *Tool) TranscodeMoflex(ctx context.Context, j Job, layout string, q int,
 	}
 	cmd := exec.CommandContext(ctx, enc, MoflexArgs(j, layout, q)...)
 	hideWindow(cmd)
+	playbackPriority(cmd)
 	cmd.Env = append(os.Environ(), moflexEnv...)
 	if t.FastMoflex() {
 		cmd.Env = append(cmd.Env, moflexFastSubme)

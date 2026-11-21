@@ -185,6 +185,7 @@ func (t *Tool) WebTranscode(ctx context.Context, j WebJob, dir string) error {
 	}
 	cmd := exec.CommandContext(ctx, ff, WebArgs(j, dir)...)
 	hideWindow(cmd)
+	playbackPriority(cmd)
 	if j.Moflex {
 		cmd.Stdin = j.In
 	}

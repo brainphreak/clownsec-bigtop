@@ -121,6 +121,7 @@ func (t *Tool) Transcode(ctx context.Context, j Job, w io.Writer) error {
 	}
 	cmd := exec.CommandContext(ctx, ff, Args(j)...)
 	hideWindow(cmd)
+	playbackPriority(cmd)
 	cmd.Stdout = w
 	var stderr bytes.Buffer
 	cmd.Stderr = &limited{&stderr, 4096}
