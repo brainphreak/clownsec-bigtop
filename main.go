@@ -66,6 +66,7 @@ func main() {
 		log.Printf("Clownsec catalog not available yet (%v); matching by file name", err)
 	}
 	ff := media.New(dir)
+	ff.SetFastMoflex(cfg.Snapshot().FastMoflex)
 	sc := &scan.Scanner{Store: store, Catalog: cat, Posters: posters, Media: ff, DataDir: dir}
 	upd := update.New(version)
 	srv := &server.Server{Cfg: cfg, Store: store, Scanner: sc, Posters: posters, Catalog: cat, Version: version,

@@ -796,6 +796,9 @@ function settingsDialog() {
       the computer has to make it faster than it plays.
       <a href="#" id="spdtest" style="color:var(--accent2)">test this computer</a> (about a minute)<br>
       <span id="spdres"></span></p>
+    <label><input type="checkbox" id="sfast" style="width:auto" ${state.fastMoflex ? 'checked' : ''}>
+      Fast encoding for an Old 3DS (for slower computers)</label>
+    <div class="hint">2–3× as fast, with slightly softer detail. Turn it on if the test says 3D is under 1.3×.</div>
     <p class="hint">Clownsec catalog: ${state.catalog.movies} movies, ${state.catalog.shows} shows ·
       <a href="#" id="refresh" style="color:var(--accent2)">re-read every file's info</a></p>
     <div class="err" id="xerr"></div>
@@ -816,14 +819,15 @@ function settingsDialog() {
       const t = await api('POST', '/admin/api/speedtest');
       const say = v => v >= 1.3 ? 'plays smoothly' : v >= 1.0 ? 'borderline: busy scenes may stutter' : 'too slow: it will stutter';
       const x = v => v.toFixed(1) + '× real time';
-      res.textContent = `2D: ${x(t.speed2d)}, ${say(t.speed2d)}. 3D: ${x(t.speed3d)}, ${say(t.speed3d)}.` +
-        (t.speed3d < 1.0 && t.speed2d >= 1.0 ? ' Play 3D videos in 2D on an Old 3DS (VIDEO > Format).' : '') +
+      res.textContent = `${t.fast ? 'Fast encoding' : 'Best quality'}: 2D ${x(t.speed2d)}, ${say(t.speed2d)}. 3D ${x(t.speed3d)}, ${say(t.speed3d)}.` +
+        (t.speed3d < 1.3 && !t.fast ? ' Try Fast encoding below (save, then test again).' : '') +
+        (t.speed3d < 1.0 && t.fast && t.speed2d >= 1.0 ? ' Play 3D videos in 2D on an Old 3DS (VIDEO > Format).' : '') +
         ' (Test clip: Big Buck Bunny, © Blender Foundation, CC BY 3.0.)';
     } catch (x) { res.textContent = x.message; }
   };
   $('#refresh').onclick = async ev => { ev.preventDefault(); await api('POST', '/admin/api/scan?refresh=1'); close(); poll(); };
   $('#xsave').onclick = async () => {
-    try { await api('PUT', '/admin/api/settings', { name: $('#sname').value, allowRemoteAdmin: $('#sremote').checked }); close(); refresh(); }
+    try { await api('PUT', '/admin/api/settings', { name: $('#sname').value, allowRemoteAdmin: $('#sremote').checked, fastMoflex: $('#sfast').checked }); close(); refresh(); }
     catch (x) { $('#xerr').textContent = x.message; }
   };
 }

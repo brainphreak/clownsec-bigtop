@@ -206,9 +206,31 @@ func (t *Tool) MoflexSpeed(ctx context.Context, j Job, layout string, durMs int6
 // split in P frames, inter 4x4 deadzone, intra-in-P bias, motion search, and the per-frame
 // quantizer (brightness/detail model, dark frames at the finest step). Measured against the
 // official encoder on dark film: see the moflex-encoder notes.
-var moflexEnv = []string{"MOBI_8X8=1", "MOBI_8X8_MS=1", "MOBI_SUBME=9",
+// MOBI_SUBME is the sub-pixel motion search, nearly all of the encoder's time: measured on 20 s
+// of 1080p Big Buck Bunny, 9 -> 7 is ~40% faster with the same size and PSNR (40.92 -> 40.91 dB);
+// 3 (moflexFastSubme, the "Fast" setting for slower computers) ~2.7x faster than 9 at -0.6 dB.
+var moflexEnv = []string{"MOBI_8X8=1", "MOBI_8X8_MS=1",
 	"MOBI_V11_MV_REFINE=1", "MOBI_V11_MV_PENALTY=0", "MOBI_SKIP=0",
 	"MOBI_CSPLIT=1", "MOBI_DZ=3", "MOBI_INTER4_DZ=1", "MOBI_P_INTRA_BIAS=200"}
+
+const (
+	moflexSubme     = "MOBI_SUBME=7"
+	moflexFastSubme = "MOBI_SUBME=3"
+)
+
+// SetFastMoflex: the faster motion search for Old 3DS streams (Settings, for slower computers).
+func (t *Tool) SetFastMoflex(on bool) {
+	t.mu.Lock()
+	t.fastMoflex = on
+	t.mu.Unlock()
+}
+
+// FastMoflex: the faster motion search is on.
+func (t *Tool) FastMoflex() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.fastMoflex
+}
 
 // moflexAQ: the per-frame quantizer, unless the request fixed one (offset 4 = ~1.5 Mbit/s 3D)
 var moflexAQ = []string{"MOBI_AQ=1", "MOBI_AQ_OFFSET=4.0"}
@@ -222,6 +244,11 @@ func (t *Tool) TranscodeMoflex(ctx context.Context, j Job, layout string, q int,
 	cmd := exec.CommandContext(ctx, enc, MoflexArgs(j, layout, q)...)
 	hideWindow(cmd)
 	cmd.Env = append(os.Environ(), moflexEnv...)
+	if t.FastMoflex() {
+		cmd.Env = append(cmd.Env, moflexFastSubme)
+	} else {
+		cmd.Env = append(cmd.Env, moflexSubme)
+	}
 	if q < 12 || q > 59 {
 		cmd.Env = append(cmd.Env, moflexAQ...)
 	}

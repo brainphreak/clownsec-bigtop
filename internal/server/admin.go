@@ -125,7 +125,7 @@ func (s *Server) adState(w http.ResponseWriter, r *http.Request) {
 	s.Store.RUnlock()
 	writeJSON(w, map[string]any{
 		"name": c.Name, "id": c.ID, "port": c.Port, "allowRemoteAdmin": c.AllowRemoteAdmin,
-		"version": s.Version, "addresses": lanAddresses(c.Port), "libraries": libs,
+		"fastMoflex": c.FastMoflex, "version": s.Version, "addresses": lanAddresses(c.Port), "libraries": libs,
 		"scan": s.Scanner.Status(), "catalog": map[string]int{"movies": cm, "shows": cs},
 		"update": s.Updater.Status(), "ffmpeg": s.Media.Status(),
 	})
@@ -188,6 +188,7 @@ func (s *Server) adSettings(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Name             *string `json:"name"`
 		AllowRemoteAdmin *bool   `json:"allowRemoteAdmin"`
+		FastMoflex       *bool   `json:"fastMoflex"`
 	}
 	if err := readJSON(r, &in); err != nil {
 		bad(w, err.Error())
@@ -200,7 +201,13 @@ func (s *Server) adSettings(w http.ResponseWriter, r *http.Request) {
 		if in.AllowRemoteAdmin != nil {
 			c.AllowRemoteAdmin = *in.AllowRemoteAdmin
 		}
+		if in.FastMoflex != nil {
+			c.FastMoflex = *in.FastMoflex
+		}
 	})
+	if in.FastMoflex != nil && err == nil {
+		s.Media.SetFastMoflex(*in.FastMoflex)
+	}
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -380,7 +387,7 @@ func (s *Server) adSpeedTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	j := media.Job{Path: path, Media: m, Audio: -1, Burn: -1}
-	out := map[string]any{"seconds": media.SpeedClipMs / 1000}
+	out := map[string]any{"seconds": media.SpeedClipMs / 1000, "fast": s.Media.FastMoflex()}
 	for _, run := range []struct{ key, layout string }{{"speed2d", ""}, {"speed3d", "hsbs"}} {
 		v, err := s.Media.MoflexSpeed(r.Context(), j, run.layout, media.SpeedClipMs, 60*time.Second)
 		if err != nil {
@@ -389,7 +396,7 @@ func (s *Server) adSpeedTest(w http.ResponseWriter, r *http.Request) {
 		}
 		out[run.key] = v
 	}
-	log.Printf("speed test: moflex 2D %.2fx, 3D %.2fx real time", out["speed2d"], out["speed3d"])
+	log.Printf("speed test (fast %v): moflex 2D %.2fx, 3D %.2fx real time", out["fast"], out["speed2d"], out["speed3d"])
 	writeJSON(w, out)
 }
 

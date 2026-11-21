@@ -45,6 +45,8 @@ type Tool struct {
 	problem string
 	checked time.Time
 	st      Status
+
+	fastMoflex bool // Old 3DS streams: the faster motion search (SetFastMoflex)
 }
 
 func New(dataDir string) *Tool { return &Tool{dataDir: dataDir} }
