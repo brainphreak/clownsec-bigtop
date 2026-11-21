@@ -34,23 +34,48 @@ var (
 	reParenTags   = regexp.MustCompile(`(?i)\((3d|s|super|hsbs|fsbs|sbs|half sbs|full sbs)\)`)
 	reJunk        = regexp.MustCompile(`(?i)\b(1080p|720p|480p|2160p|4k|uhd|bluray|blu-ray|bdrip|bd-rip|brrip|web-?dl|webrip|hdtv|dvdrip|x264|x265|h\.?264|h\.?265|hevc|aac[0-9.]*|ac3|dts|repack|proper|remux|limited|extended|unrated|10bit)\b.*$`)
 	reSpaces      = regexp.MustCompile(`\s+`)
+
+	// 3D tags, on a name whose "_" "." "-" are spaces. The player (mp4_play.c fmt_from_name) uses
+	// the same words, so a file is 3D or not the same way on the SD card and through Big Top:
+	// "HSBS" "H-SBS" "Half SBS" "Half-SBS" "HalfSBS" "Half.SBS" "Half_SBS" -> half side-by-side,
+	// the same with Full / F -> full, "SBS" or "LR" alone -> half (a 16:9 SBS frame is half),
+	// "3D" alone -> half too (the common 3D rip). Whole words only: no "lr" inside "Ultra".
+	reHalfSbs = regexp.MustCompile(`\b(half ?|h ?)sbs\b`)
+	reFullSbs = regexp.MustCompile(`\b(full ?|f ?)sbs\b`)
+	reSbs     = regexp.MustCompile(`\b(sbs|lr)\b`)
+	re3D      = regexp.MustCompile(`\b3d\b`)
+	reLrTok   = regexp.MustCompile(`(?i)\blrf?\b`)
+	// the side-by-side tags out of the title ("Avatar Half-SBS 2009" -> "Avatar 2009")
+	reSbsTag = regexp.MustCompile(`(?i)[(\[]?\b(?:(?:half|full|h|f)[ ._-]?)?sbs\b[)\]]?`)
 )
+
+// NameLayout: what a file name says about 3D -- (1, "half-sbs" / "full-sbs") for a side-by-side
+// tag, (1, "") for "3D" alone, (0, "") for nothing.
+func NameLayout(name string) (int, string) {
+	low := strings.ToLower(strings.NewReplacer("_", " ", ".", " ", "-", " ").Replace(name))
+	switch {
+	case reHalfSbs.MatchString(low):
+		return 1, "half-sbs"
+	case reFullSbs.MatchString(low):
+		return 1, "full-sbs"
+	case reSbs.MatchString(low):
+		return 1, "half-sbs"
+	case re3D.MatchString(low):
+		return 1, ""
+	}
+	return 0, ""
+}
 
 // ParseName reads title / year / episode / 3D hints out of a video file name.
 func ParseName(path string) Parsed {
 	name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	var p Parsed
-	low := strings.ToLower(strings.NewReplacer("_", " ", ".", " ").Replace(name))
-	switch {
-	case strings.Contains(low, "half sbs") || strings.Contains(low, "hsbs"):
-		p.Is3D, p.Layout = 1, "half-sbs"
-	case strings.Contains(low, "full sbs") || strings.Contains(low, "fsbs"):
-		p.Is3D, p.Layout = 1, "full-sbs"
-	case strings.Contains(low, "(3d)") || regexp.MustCompile(`(?i)\b3d\b`).MatchString(name):
-		p.Is3D = 1
-	}
+	// the encoder's tail: its "Full Sbs" counts, its "Lr" / "Lrf" does not (2D files have it too)
+	tail := strings.ReplaceAll(reEncoderTail.FindString(name), "_", " ")
 	name = reEncoderTail.ReplaceAllString(name, "")
+	p.Is3D, p.Layout = NameLayout(name + " " + reLrTok.ReplaceAllString(tail, " "))
 	name = reParenTags.ReplaceAllString(name, "")
+	name = reSbsTag.ReplaceAllString(name, " ")
 
 	// an episode: the show is what comes before the marker, the episode title what comes after
 	if m := firstMatch(name, reSE, reNxNN, reDashNum); m != nil {

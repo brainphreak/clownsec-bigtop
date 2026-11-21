@@ -210,8 +210,10 @@ func (sc *Scanner) scanLib(lib *library.Library, refresh bool) {
 			it.Lib, it.Path, it.Size, it.MTime, it.Fingerprint = lib.ID, f.path, f.size, f.mtime, fp
 			sc.Store.Unlock()
 			sc.identify(it)
-		} else if refresh || (library.IsMoflex(it.Path) && !it.Checked3D) {
-			// a moflex from before Big Top read 3D from the file itself: once, for its 3D label
+		} else if refresh || (library.IsMoflex(it.Path) && !it.Checked3D) ||
+			(!library.IsMoflex(it.Path) && it.Rules3D < library.Rules3DVer) {
+			// a moflex from before Big Top read 3D from the file itself, or another video from
+			// before the current 3D rules: once, for its 3D label and layout
 			sc.identify(it)
 		}
 		if library.IsMoflex(it.Path) && !it.Checked3D {
@@ -390,6 +392,11 @@ func (sc *Scanner) identify(it *library.Item) {
 			if det.Runtime == 0 && m.DurMs > 0 {
 				det.Runtime = int((m.DurMs + 30000) / 60000)
 			}
+			// a double-wide frame is full side-by-side by its shape alone, whatever the name says
+			// (the player's rule: two 16:9 halves are 3.55:1, normal films top out near 2.4:1)
+			if m.W > 0 && m.H > 0 && m.W*10 > m.H*27 {
+				det.Is3D = "fsbs"
+			}
 		} else {
 			log.Printf("ffprobe %s: %v", filepath.Base(it.Path), err)
 		}
@@ -422,6 +429,9 @@ func (sc *Scanner) identify(it *library.Item) {
 	sc.Store.Lock()
 	defer sc.Store.Unlock()
 	it.Detected, it.Source, it.Catalog = det, source, catID
+	if !library.IsMoflex(it.Path) {
+		it.Rules3D = library.Rules3DVer
+	}
 	if med != nil {
 		it.Media = med
 	}

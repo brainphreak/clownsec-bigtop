@@ -36,6 +36,19 @@ func TestParseName(t *testing.T) {
 			Parsed{Title: "Mr. Robot", Year: 2015, Season: 2, Episode: 1, Marked: true}},
 		{"Thundercats 1985 S01e01 1080P Web-Dl Ddp2.0 X264 Dual-Nogroup Lr_400x240_1100kbps_23.976fps_2pass.moflex",
 			Parsed{Title: "Thundercats", Year: 1985, Season: 1, Episode: 1, Marked: true}},
+		// 3D tags in other videos' names, the same words the player reads
+		{"Avatar.2009.Half-SBS.1080p.mkv", Parsed{Title: "Avatar", Year: 2009, Is3D: 1, Layout: "half-sbs"}},
+		{"Avatar 2009 HalfSBS.avi", Parsed{Title: "Avatar", Year: 2009, Is3D: 1, Layout: "half-sbs"}},
+		{"Avatar (2009) H-SBS.mp4", Parsed{Title: "Avatar", Year: 2009, Is3D: 1, Layout: "half-sbs"}},
+		{"Avatar_2009_Half_SBS.mkv", Parsed{Title: "Avatar", Year: 2009, Is3D: 1, Layout: "half-sbs"}},
+		{"Avatar (2009) [HSBS].mkv", Parsed{Title: "Avatar", Year: 2009, Is3D: 1, Layout: "half-sbs"}},
+		{"Avatar.2009.Full-SBS.mkv", Parsed{Title: "Avatar", Year: 2009, Is3D: 1, Layout: "full-sbs"}},
+		{"Avatar 2009 FullSBS.avi", Parsed{Title: "Avatar", Year: 2009, Is3D: 1, Layout: "full-sbs"}},
+		{"Avatar (2009) (FSBS).mkv", Parsed{Title: "Avatar", Year: 2009, Is3D: 1, Layout: "full-sbs"}},
+		{"Avatar 2009 SBS.mp4", Parsed{Title: "Avatar", Year: 2009, Is3D: 1, Layout: "half-sbs"}},
+		{"Avatar 2009 LR.mp4", Parsed{Title: "Avatar", Year: 2009, Is3D: 1, Layout: "half-sbs"}},
+		{"Avatar.2009.3D.mkv", Parsed{Title: "Avatar", Year: 2009, Is3D: 1}},
+		{"Ultraman (2004).mkv", Parsed{Title: "Ultraman", Year: 2004}},
 		// specials: episode 0 of a season, or season 0
 		{"To Love Ru OVAs (2009) (3D) (S) - S04e00 - Momo no Rakuen Keikaku Maruhi File.moflex",
 			Parsed{Title: "To Love Ru OVAs", Year: 2009, Season: 4, Episode: 0, EpTitle: "Momo no Rakuen Keikaku Maruhi File", Is3D: 1, Marked: true}},
@@ -52,8 +65,8 @@ func TestParseName(t *testing.T) {
 
 func TestIsEpisodeSpecials(t *testing.T) {
 	for in, want := range map[string]bool{
-		"Show (2009) - S04e00 - Special.moflex": true,  // episode 0 = a special of season 4
-		"Show (2009) - S00e03 - Special.moflex": true,  // season 0 = the specials season
+		"Show (2009) - S04e00 - Special.moflex": true, // episode 0 = a special of season 4
+		"Show (2009) - S00e03 - Special.moflex": true, // season 0 = the specials season
 		"Show (2009) - S01e02 - Episode.moflex": true,
 		"Show (2009) - S00e00 - Nothing.moflex": false, // says nothing
 		"Movie (2009).moflex":                   false,

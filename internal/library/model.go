@@ -98,6 +98,7 @@ type Item struct {
 	Missing     int64  `json:"missing,omitempty"` // unix time the file was last not found (0 = present)
 	Added       int64  `json:"added"`
 	Checked3D   bool   `json:"c3d,omitempty"` // a moflex whose own frames were checked for 3D (once)
+	Rules3D     int    `json:"r3d,omitempty"` // the 3D rules (Rules3DVer) this file was last identified with
 
 	Detected  Info     `json:"detected"`
 	Edit      Info     `json:"edit"`
@@ -131,6 +132,10 @@ type Media struct {
 	FpsDen int     `json:"fpsd,omitempty"`
 	Ver    int     `json:"ver,omitempty"` // what the probe recorded (older entries are probed again)
 }
+
+// Rules3DVer: bump when the 3D rules change (name tags, the frame's shape), so files identified
+// before are identified once more on the next scan.
+const Rules3DVer = 1
 
 // ProbeVer: bump when Probe records something new, so entries from before are probed again.
 const ProbeVer = 1
