@@ -51,6 +51,8 @@ label { display: block; font-size: 12px; color: var(--dim); margin: 10px 0 4px; 
 .badge { position: absolute; top: 6px; left: 6px; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 5px; background: #000a; }
 .badge.r { left: auto; right: 6px; }
 .b3d { color: var(--accent2); } .bsup { color: var(--ok); } .bfn { color: var(--warn); }
+.badge.bf { top: auto; bottom: 10px; color: #fff; }   /* a file the Old 3DS gets encoded live: MP4, MKV, AVI */
+.ep .f { font-size: 11px; font-weight: 700; color: var(--dim); margin-right: 6px; }
 .status { color: var(--dim); font-size: 13px; }
 .bar { height: 4px; background: var(--panel2); border-radius: 4px; overflow: hidden; margin-top: 6px; }
 .bar div { height: 100%; background: var(--accent); width: 0; transition: width .4s; }
@@ -203,6 +205,7 @@ body.viewer .admin { display: none !important; }   /* an inline display:flex wou
         <option value="year">Year (newest)</option><option value="yearAsc">Year (oldest)</option><option value="runtime">Length</option></select>
       <span class="lbl" style="margin-left:8px">Show</span>
       <span id="f3d"></span>
+      <span id="ffmt"></span>
       <button class="chip" id="fsup" title="Only super moflex files">Super only</button>
       <button class="chip" id="funw" title="Hide what you've watched (in this browser)">Unwatched</button>
       <span class="grow"></span>
@@ -372,7 +375,7 @@ async function loadLib() {
 
 // ---------- browsing ----------
 // The filters, kept between visits (per viewer, in this browser).
-const F = Object.assign({ kind: 'all', d3: 'all', sup: false, unw: false, sort: 'added', genre: 'all', letter: 'all' },
+const F = Object.assign({ kind: 'all', d3: 'all', fmt: 'all', sup: false, unw: false, sort: 'added', genre: 'all', letter: 'all' },
   (() => { try { return JSON.parse(localStorage.getItem('bt.browse') || '{}'); } catch { return {}; } })());
 const saveF = () => { try { localStorage.setItem('bt.browse', JSON.stringify(F)); } catch {} };
 const KIND = { all: 'All', movie: 'Movies', tvshow: 'TV shows', musicvideo: 'Music videos', short: 'Shorts' };
@@ -384,6 +387,8 @@ const letterOf = t => { const c = sortTitle(t).charAt(0).toUpperCase(); return c
 const genresOf = g => (g || '').split(',').map(x => x.trim()).filter(Boolean);
 const fmtMin = m => m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`;
 const is3d = v => ['3d', 'hsbs', 'fsbs'].includes(v);
+// the file's container: MOFLEX plays as it is; MP4/MKV/AVI are converted as they play
+const fmtOf = it => (it.fmt || ((it.path || '').split('.').pop() || '')).toUpperCase();
 
 // how far this browser got: 0..1 (0 = not started, or finished)
 function progOf(it) {
@@ -400,7 +405,7 @@ function titles() {
     out.push({ kind: it.kind || 'movie', id: it.id, title: it.info.title || 'Untitled', year: it.info.year || 0,
       genres: genresOf(it.info.genres), added: it.added || 0, runtime: it.info.runtime || Math.round((it.dur || 0) / 60000),
       is3d: is3d(it.info.is3d), sup: it.super, src: it.source, poster: it.poster, sum: it.info.summary || '',
-      watched: !!it.watched, prog: progOf(it) });
+      fmts: [fmtOf(it)], watched: !!it.watched, prog: progOf(it) });
   }
   for (const sh of libData.shows) {
     const eps = libData.items.filter(i => i.showId === sh.id && !i.missing);
@@ -409,6 +414,7 @@ function titles() {
       genres: genresOf(sh.info.genres), added: Math.max(...eps.map(e => e.added || 0)), runtime: 0,
       is3d: eps.some(e => is3d(e.info.is3d)), sup: eps.some(e => e.super), src: 'show', poster: sh.poster,
       sum: sh.info.summary || '', eps: eps.length, seen: eps.filter(e => e.watched).length,
+      fmts: [...new Set(eps.map(e => fmtOf(e)))],
       watched: eps.every(e => e.watched), prog: eps.some(e => e.watched || e.pos) ? eps.filter(e => e.watched).length / eps.length : 0 });
   }
   return out;
@@ -427,6 +433,7 @@ function renderGrid() {
   // each filter row counts what the *other* filters leave, so its numbers say what a click would show
   const pass = (t, skip) => (skip === 'kind' || F.kind === 'all' || t.kind === F.kind) &&
     (skip === 'd3' || F.d3 === 'all' || (F.d3 === '3d') === t.is3d) &&
+    (skip === 'fmt' || F.fmt === 'all' || t.fmts.includes(F.fmt)) &&
     (!F.sup || t.sup) && (!F.unw || !t.watched) &&
     (skip === 'genre' || F.genre === 'all' || t.genres.includes(F.genre)) &&
     (skip === 'letter' || F.letter === 'all' || letterOf(t.title) === F.letter) &&
@@ -441,6 +448,12 @@ function renderGrid() {
   const d3 = { '3d': 0, '2d': 0 }; all.filter(t => pass(t, 'd3')).forEach(t => d3[t.is3d ? '3d' : '2d']++);
   $('#f3d').innerHTML = [['all', 'All'], ['3d', '3D'], ['2d', '2D']]
     .map(([k, l]) => chip(l, F.d3 === k, `data-d="${k}"`, k === 'all' ? null : d3[k])).join(' ');
+  // Format: only when the library has more than one kind of file (a show counts under each of its formats)
+  const fc = {}; all.filter(t => pass(t, 'fmt')).forEach(t => t.fmts.forEach(f => fc[f] = (fc[f] || 0) + 1));
+  const fAll = [...new Set(all.flatMap(t => t.fmts))].sort((a, b) => (a === 'MOFLEX' ? -1 : b === 'MOFLEX' ? 1 : a.localeCompare(b)));
+  if (F.fmt !== 'all' && !fAll.includes(F.fmt)) F.fmt = 'all';
+  $('#ffmt').innerHTML = fAll.length > 1 ? '<span class="lbl" style="margin-left:8px">Format</span>' +
+    chip('All', F.fmt === 'all', 'data-f="all"') + ' ' + fAll.map(f => chip(f, F.fmt === f, `data-f="${esc(f)}"`, fc[f] || 0)).join(' ') : '';
   $('#fsup').classList.toggle('on', F.sup);
   $('#funw').classList.toggle('on', F.unw);
   $('#fsup').hidden = !all.some(t => t.sup);
@@ -464,7 +477,7 @@ function renderGrid() {
     runtime: (a, b) => b.runtime - a.runtime,
   }[F.sort] || (() => 0);
   const shown = all.filter(t => pass(t)).sort((a, b) => by(a, b) || sortTitle(a.title).localeCompare(sortTitle(b.title)));
-  const filtered = F.kind !== 'all' || F.d3 !== 'all' || F.sup || F.unw || F.genre !== 'all' || F.letter !== 'all' || words.length;
+  const filtered = F.kind !== 'all' || F.d3 !== 'all' || F.fmt !== 'all' || F.sup || F.unw || F.genre !== 'all' || F.letter !== 'all' || words.length;
   $('#fcount').textContent = filtered ? `${shown.length} of ${all.length}` : `${all.length} titles`;
   $('#fclear').hidden = !filtered;
 
@@ -476,6 +489,7 @@ function renderGrid() {
     return `<div class="tile ${t.watched ? 'watched' : ''}" data-kind="${t.kind === 'tvshow' ? 'show' : 'item'}" data-id="${t.id}" tabindex="0">
       <div class="art">${t.poster ? `<img src="${url}" alt="" loading="lazy" decoding="async">` : `<div class="none">${esc(t.title)}</div>`}
         ${t.is3d ? '<span class="badge b3d">3D</span>' : ''}${tag}
+        ${t.fmts.some(f => f !== 'MOFLEX') ? `<span class="badge bf" title="Played on an Old 3DS by converting it as it plays">${esc(t.fmts.filter(f => f !== 'MOFLEX').join(' · '))}</span>` : ''}
         ${t.watched ? '<span class="seen" title="Watched">✓</span>' : t.prog ? `<div class="prog"><div style="width:${Math.max(3, t.prog * 100)}%"></div></div>` : ''}</div>
       <div class="t" title="${esc(t.title)}">${esc(t.title)}</div><div class="s">${esc(sub)}</div></div>`;
   }).join('');
@@ -491,11 +505,12 @@ $('#filters').addEventListener('click', ev => {
   const b = ev.target.closest('button'); if (!b) return;
   if (b.dataset.k) setF('kind', b.dataset.k);
   else if (b.dataset.d) setF('d3', b.dataset.d);
+  else if (b.dataset.f) setF('fmt', b.dataset.f);
   else if (b.dataset.g !== undefined) setF('genre', b.dataset.g || 'all');
   else if (b.dataset.l) setF('letter', b.dataset.l);
   else if (b.id === 'fsup') setF('sup', !F.sup);
   else if (b.id === 'funw') setF('unw', !F.unw);
-  else if (b.id === 'fclear') { Object.assign(F, { kind: 'all', d3: 'all', sup: false, unw: false, genre: 'all', letter: 'all' }); $('#search').value = ''; saveF(); renderGrid(); }
+  else if (b.id === 'fclear') { Object.assign(F, { kind: 'all', d3: 'all', fmt: 'all', sup: false, unw: false, genre: 'all', letter: 'all' }); $('#search').value = ''; saveF(); renderGrid(); }
 });
 $('#fsort').onchange = () => setF('sort', $('#fsort').value);
 $('#search').oninput = () => renderGrid();
@@ -760,7 +775,7 @@ function showDialog(sid) {
       </div>
     </div>
     <div class="eps">${eps.map(x => `<div class="ep"><span class="n">S${x.info.season || 0}·E${x.info.episode || 0}</span>
-      <span class="x">${esc(x.info.epTitle || x.info.title || '')}</span><button class="small" data-ep="${x.id}">Edit</button></div>`).join('')}</div>
+      <span class="x">${fmtOf(x) !== 'MOFLEX' ? `<span class="f">${esc(fmtOf(x))}</span>` : ''}${esc(x.info.epTitle || x.info.title || '')}</span><button class="small" data-ep="${x.id}">Edit</button></div>`).join('')}</div>
     <div class="err" id="serr"></div>
     <div class="actions"><button id="scancel">Close</button><button class="primary" id="ssave">Save show</button></div>`);
   $('#scancel').onclick = close;
