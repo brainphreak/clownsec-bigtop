@@ -42,7 +42,7 @@ left out.
 
 | Field | Type | |
 |---|---|---|
-| `type` | string | `movie`, `show`, `season` or `episode` |
+| `type` | string | `movie`, `show`, `season`, `episode` or `group` (a film with extras, see below) |
 | `id` | string | |
 | `title` | string | an episode's own title (or "Episode N") |
 | `year` | int | |
@@ -60,7 +60,7 @@ left out.
 | `watched` | bool | this client has watched it |
 | `size` | int | file size in bytes |
 | `super` | bool | a SUPER MOFLEX |
-| `episodes`, `seen` | int | shows and seasons: episode count, and how many this client watched |
+| `episodes`, `seen` | int | shows and seasons: episode count, and how many this client watched; groups: `episodes` = how many extras |
 | `audio`, `altAudio` | string | item details only: in-band and trailer audio languages (`ENG`, `JPN`) |
 | `subs` | string | item details only: built-in subtitle languages, space-separated |
 | `file` | string | item details only: the file's name |
@@ -83,6 +83,26 @@ A library's movies and shows together, sorted by title (a leading "The" ignored)
 `start` / `size` page through a big library (no `size` = everything).
 ```json
 {"total":105,"items":[ {Entry}, ... ]}
+```
+
+Films with extras: a client that sends `X-BigTop-Features: groups` gets each film that has extras
+as one `group` Entry instead of one Entry per file. It is the film's own Entry (its `id`, so
+`/api/items/{id}/poster` is the film's poster) with `type` `group` and the number of extras in
+`episodes`; when the film itself isn't found, `id` is the group's id and the title comes from the
+extras' folder. A client that doesn't send the header gets every file, extras included, as before.
+
+Extras follow Plex's rules: in a film's folder, a file named `Title-interview` (or `-trailer`,
+`-featurette`, `-behindthescenes`, `-deleted`, `-scene`, `-short`, `-other`), or any video in an
+`Extras`, `Interviews`, `Trailers`, `Featurettes`, `Behind The Scenes`, `Deleted Scenes`, `Scenes`,
+`Shorts` or `Other` folder inside it. They belong to the film with the same title and year in
+any library (a folder's name, or a loose file's), so a film kept on another share keeps them.
+
+### `GET /api/groups/{id}`
+A film with extras: the film (or films) first, then the extras by kind (trailers, featurettes,
+behind the scenes, interviews, deleted scenes, scenes, shorts, other) and title. An extra's
+`title` says what it is: `"Chasing an Angel (Interview)"`.
+```json
+{"total":3,"items":[ {Entry}, ... ]}
 ```
 
 ### `GET /api/shows/{id}`
