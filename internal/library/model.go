@@ -114,6 +114,10 @@ type Item struct {
 	Poster    string   `json:"poster,omitempty"`    // file in the posters folder
 	PosterBy  string   `json:"posterBy,omitempty"`  // "super", "catalog", "user"
 	Media     *Media   `json:"media,omitempty"`     // not moflex: what ffprobe found (nil = not probed yet)
+	// Plex-style extras (extras.go): Extra is the kind ("interview", "trailer", ...; "" = not an
+	// extra); Group is set on every film and extra in a movie folder that has extras (GroupID)
+	Extra string `json:"extra,omitempty"`
+	Group string `json:"group,omitempty"`
 }
 
 // Media is a non-moflex file's streams, as ffprobe reports them. Big Top transcodes these to the

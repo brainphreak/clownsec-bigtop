@@ -93,6 +93,7 @@ func (sc *Scanner) scanAll(refresh bool) error {
 	for _, lib := range libs {
 		sc.scanLib(lib, refresh)
 	}
+	sc.buildGroups(libs)
 	sc.Store.Dirty()
 	return nil
 }
@@ -552,5 +553,59 @@ func (sc *Scanner) buildShows(lib *library.Library) {
 		sh.Detected = det
 		sc.Store.DB.Shows[id] = sh
 		sc.Store.Unlock()
+	}
+}
+
+// buildGroups applies Plex's extras rules: an extra takes its title from its own name (no catalog
+// match -- "Trailer-trailer" is not a film called Trailer) and joins its film's group: the film
+// whose folder (or loose file) has the same title and year, in any library -- a film moved to
+// another share keeps its extras. The 3DS lists a group as one entry with the extras inside.
+// Path-based and cheap, so it runs over every file on every scan (re-identifying a file puts its
+// catalog info back; this takes it off again).
+func (sc *Scanner) buildGroups(libs []*library.Library) {
+	roots := map[string][]string{}
+	for _, l := range libs {
+		roots[l.ID] = l.Folders
+	}
+	sc.Store.Lock()
+	defer sc.Store.Unlock()
+	type fx struct{ kind, title, key string }
+	info := map[*library.Item]fx{}
+	hasExtras := map[string]bool{}
+	for _, it := range sc.Store.DB.Items {
+		if it.Missing != 0 {
+			continue
+		}
+		k, t, d := library.ExtraOf(it.Path, roots[it.Lib])
+		var key string
+		if d != "" {
+			key = library.FolderKey(d)
+		} else if k == "" {
+			key = library.FileKey(it.Path)
+		}
+		info[it] = fx{k, t, key}
+		if k != "" && key != "" {
+			hasExtras[key] = true
+		}
+	}
+	for it, f := range info {
+		if f.kind != "" {
+			if it.Extra != f.kind || it.Detected.Title != f.title || it.Catalog != "" {
+				it.Detected = library.Info{Title: f.title, Runtime: it.Detected.Runtime, Is3D: it.Detected.Is3D}
+				it.Catalog, it.Source = "", "filename"
+				if it.PosterBy == "catalog" { // another film's poster, matched by a title like "Trailer"
+					it.Poster, it.PosterBy = "", ""
+				}
+			}
+			it.Extra, it.Group = f.kind, ""
+			if f.key != "" {
+				it.Group = library.GroupID(f.key)
+			}
+			continue
+		}
+		it.Extra, it.Group = "", ""
+		if f.key != "" && hasExtras[f.key] && !it.IsEpisode() {
+			it.Group = library.GroupID(f.key)
+		}
 	}
 }

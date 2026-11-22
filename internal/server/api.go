@@ -45,6 +45,7 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("GET /api/shows/{id}", s.apiShow)
 	m.HandleFunc("GET /api/shows/{id}/seasons/{n}", s.apiSeason)
 	m.HandleFunc("GET /api/shows/{id}/poster", s.apiShowPoster)
+	m.HandleFunc("GET /api/groups/{id}", s.apiGroup)
 	m.HandleFunc("GET /api/items/{id}", s.apiItem)
 	m.HandleFunc("GET /api/items/{id}/poster", s.apiItemPoster)
 	m.HandleFunc("GET /api/items/{id}/file", s.apiFile)
@@ -70,7 +71,7 @@ func (s *Server) Handler() http.Handler {
 
 // Entry is one row of a list: a movie, a show, or an episode. Kept flat and small -- a 3DS parses it.
 type Entry struct {
-	Type     string `json:"type"` // "movie", "show", "episode"
+	Type     string `json:"type"` // "movie", "show", "episode", "group" (a film with extras)
 	ID       string `json:"id"`
 	Title    string `json:"title"`
 	Year     int    `json:"year,omitempty"`
@@ -89,7 +90,7 @@ type Entry struct {
 	Format   string `json:"fmt,omitempty"`      // the file's container: "MOFLEX", "MP4", "MKV", ...
 	Kind     string `json:"kind,omitempty"`     // movies: "movie", "short", "musicvideo"
 	Added    int64  `json:"added,omitempty"`    // unix time first found
-	Episodes int    `json:"episodes,omitempty"` // shows/seasons: how many
+	Episodes int    `json:"episodes,omitempty"` // shows/seasons: how many; groups: how many extras
 	Seen     int    `json:"seen,omitempty"`     // ...and how many watched
 	Audio    string `json:"audio,omitempty"`
 	AltAudio string `json:"altAudio,omitempty"` // every trailer audio track's language, space-separated
@@ -102,6 +103,40 @@ type Entry struct {
 	AudioTracks []TrackOut `json:"audioTracks,omitempty"` // stream.ts?audio=n
 	BurnSubs    []TrackOut `json:"burnSubs,omitempty"`    // stream.ts?burn=n (picture subtitles)
 	StreamErr   string     `json:"streamErr,omitempty"`   // why it can't be streamed now (shown on the 3DS)
+}
+
+// groupsOK: the console lists films with extras as groups (X-BigTop-Features: groups). An older
+// player gets every file as its own entry, as before.
+func groupsOK(r *http.Request) bool {
+	return strings.Contains(r.Header.Get("X-BigTop-Features"), "groups") || r.URL.Query().Get("groups") == "1"
+}
+
+// groupMembers: every present film and extra by group id. Caller holds a read lock.
+func (s *Server) groupMembers() map[string][]*library.Item {
+	g := map[string][]*library.Item{}
+	for _, it := range s.Store.DB.Items {
+		if it.Group != "" && it.Missing == 0 {
+			g[it.Group] = append(g[it.Group], it)
+		}
+	}
+	return g
+}
+
+// sortGroup: the film(s) first, then the extras by kind (trailers, featurettes, ...) and title.
+func sortGroup(m []*library.Item) {
+	sort.Slice(m, func(i, j int) bool {
+		a, b := m[i], m[j]
+		if (a.Extra == "") != (b.Extra == "") {
+			return a.Extra == ""
+		}
+		if a.Extra != b.Extra {
+			return library.ExtraOrder(a.Extra) < library.ExtraOrder(b.Extra)
+		}
+		if ta, tb := sortKey(a.Info().Title), sortKey(b.Info().Title); ta != tb {
+			return ta < tb
+		}
+		return a.Path < b.Path
+	})
 }
 
 func clientID(r *http.Request) string {
@@ -158,6 +193,9 @@ func (s *Server) itemEntry(it *library.Item, client string, full bool) Entry {
 		if e.Title == "" {
 			e.Title = "Episode " + strconv.Itoa(in.Episode)
 		}
+	}
+	if it.Extra != "" {
+		e.Title = library.ExtraName(it.Extra, in.Title)
 	}
 	if e.Title == "" {
 		e.Title = strings.TrimSuffix(filepath.Base(it.Path), filepath.Ext(it.Path))
@@ -257,7 +295,7 @@ func (s *Server) apiLibraries(w http.ResponseWriter, r *http.Request) {
 			}
 			if it.IsEpisode() {
 				shows[library.ShowID(l.ID, it.Info().Show)] = true
-			} else {
+			} else if it.Extra == "" {
 				x.Movies++
 			}
 		}
@@ -295,8 +333,18 @@ func (s *Server) apiLibrary(w http.ResponseWriter, r *http.Request) {
 	}
 	var list []Entry
 	shows := map[string]*Entry{}
+	grouped := groupsOK(r)
+	var members map[string][]*library.Item
+	inGroup := map[string]bool{}
+	if grouped {
+		members = s.groupMembers()
+	}
 	for _, it := range s.Store.DB.Items {
 		if it.Lib != id || it.Missing != 0 {
+			continue
+		}
+		if grouped && it.Group != "" && !it.IsEpisode() {
+			inGroup[it.Group] = true
 			continue
 		}
 		if !it.IsEpisode() {
@@ -320,6 +368,11 @@ func (s *Server) apiLibrary(w http.ResponseWriter, r *http.Request) {
 	for _, e := range shows {
 		list = append(list, *e)
 	}
+	for gid := range inGroup {
+		if e, ok := s.groupEntry(gid, id, members[gid], client); ok {
+			list = append(list, e)
+		}
+	}
 	sort.Slice(list, func(i, j int) bool {
 		a, b := sortKey(list[i].Title), sortKey(list[j].Title)
 		if a != b {
@@ -329,6 +382,74 @@ func (s *Server) apiLibrary(w http.ResponseWriter, r *http.Request) {
 	})
 	total, page := pageOf(r, list)
 	writeJSON(w, map[string]any{"total": total, "items": page})
+}
+
+// groupEntry: a film with extras, as one row of library lib -- the film's own row (its id, so
+// its poster and info are the film's) with type "group". It is listed in the film's library; a
+// group whose film is nowhere to be found is listed under its extras' library, named after their
+// folder. ok = false: list it elsewhere. Caller holds a read lock.
+func (s *Server) groupEntry(gid, lib string, m []*library.Item, client string) (Entry, bool) {
+	sortGroup(m)
+	if len(m) == 0 {
+		return Entry{}, false
+	}
+	extras := 0
+	for _, it := range m {
+		if it.Extra != "" {
+			extras++
+		}
+	}
+	var e Entry
+	if main := m[0]; main.Extra == "" {
+		if main.Lib != lib {
+			return Entry{}, false
+		}
+		e = s.itemEntry(main, client, false)
+	} else {
+		if main.Lib != lib {
+			return Entry{}, false
+		}
+		var p library.Parsed // named after the film's folder ("Angel (1983) {imdb-...}")
+		if l := s.Store.Lib(main.Lib); l != nil {
+			if _, _, d := library.ExtraOf(main.Path, l.Folders); d != "" {
+				p = library.ParseName(filepath.Base(d) + ".mkv")
+			}
+		}
+		e = Entry{ID: gid, Title: p.Title, Year: p.Year, Kind: "movie", Added: main.Added}
+		for _, it := range m {
+			if it.Added > e.Added {
+				e.Added = it.Added
+			}
+		}
+	}
+	e.Type, e.Episodes = "group", extras
+	if e.Title == "" {
+		e.Title = "Extras"
+	}
+	return e, true
+}
+
+// A film with extras: the film (or films, a folder may hold more than one) and its extras.
+// {id} is the group's row id: the film's item id, or the group id when there is no film.
+func (s *Server) apiGroup(w http.ResponseWriter, r *http.Request) {
+	id, client := r.PathValue("id"), clientID(r)
+	s.Store.RLock()
+	defer s.Store.RUnlock()
+	gid := id
+	if it := s.Store.DB.Items[id]; it != nil && it.Group != "" {
+		gid = it.Group
+	}
+	m := s.groupMembers()[gid]
+	if len(m) == 0 {
+		http.NotFound(w, r)
+		return
+	}
+	sortGroup(m)
+	out := make([]Entry, 0, len(m))
+	for _, it := range m {
+		out = append(out, s.itemEntry(it, client, false))
+	}
+	writeJSON(w, map[string]any{"total": len(out), "items": out})
 }
 
 // showEntry: caller holds a read lock.
