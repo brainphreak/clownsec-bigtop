@@ -400,12 +400,24 @@ function progOf(it) {
 // every title of the library once: movies/shorts/music videos, and shows (their episodes inside)
 function titles() {
   const out = [];
+  const G = libData.groups || {};
   for (const it of libData.items) {
-    if (it.missing || it.showId) continue;
+    if (it.missing || it.showId || it.extra || it.foreign) continue;   // extras: inside their film
+    const g = it.group && G[it.group];
     out.push({ kind: it.kind || 'movie', id: it.id, title: it.info.title || 'Untitled', year: it.info.year || 0,
+      extras: g ? g.extras.length : 0,
       genres: genresOf(it.info.genres), added: it.added || 0, runtime: it.info.runtime || Math.round((it.dur || 0) / 60000),
       is3d: is3d(it.info.is3d), sup: it.super, src: it.source, poster: it.poster, sum: it.info.summary || '',
       fmts: [fmtOf(it)], watched: !!it.watched, prog: progOf(it) });
+  }
+  // a folder of extras whose film isn't in any library: one card, named after the folder
+  for (const [gid, g] of Object.entries(G)) {
+    if (g.main || !g.here) continue;
+    const xs = libData.items.filter(i => g.extras.includes(i.id) && !i.missing);
+    if (!xs.length) continue;
+    out.push({ kind: 'movie', id: gid, group: true, title: g.title || 'Extras', year: g.year || 0, genres: [],
+      added: Math.max(...xs.map(e => e.added || 0)), runtime: 0, is3d: false, sup: false, src: 'group', poster: false,
+      sum: '', extras: xs.length, fmts: [...new Set(xs.map(e => fmtOf(e)))], watched: xs.every(e => e.watched), prog: 0 });
   }
   for (const sh of libData.shows) {
     const eps = libData.items.filter(i => i.showId === sh.id && !i.missing);
@@ -485,8 +497,9 @@ function renderGrid() {
   $('#grid').innerHTML = shown.map(t => {
     const url = t.kind === 'tvshow' ? `/api/shows/${t.id}/poster?w=280&h=400&v=${bust}` : `/api/items/${t.id}/poster?w=280&h=400&v=${bust}`;
     const tag = t.sup ? '<span class="badge r bsup">SUPER</span>' : t.src === 'filename' && !state.viewer ? '<span class="badge r bfn" title="Only the file name was recognised">CHECK</span>' : '';
-    const sub = t.kind === 'tvshow' ? (t.seen && !t.watched ? `${t.seen} of ${t.eps} watched` : `${t.eps} episode${t.eps === 1 ? '' : 's'}`) : (t.year || '');
-    return `<div class="tile ${t.watched ? 'watched' : ''}" data-kind="${t.kind === 'tvshow' ? 'show' : 'item'}" data-id="${t.id}" tabindex="0">
+    const sub = t.kind === 'tvshow' ? (t.seen && !t.watched ? `${t.seen} of ${t.eps} watched` : `${t.eps} episode${t.eps === 1 ? '' : 's'}`)
+      : [t.year || '', t.extras ? `+${t.extras} extra${t.extras === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ');
+    return `<div class="tile ${t.watched ? 'watched' : ''}" data-kind="${t.kind === 'tvshow' ? 'show' : t.group ? 'group' : 'item'}" data-id="${t.id}" tabindex="0">
       <div class="art">${t.poster ? `<img src="${url}" alt="" loading="lazy" decoding="async">` : `<div class="none">${esc(t.title)}</div>`}
         ${t.is3d ? '<span class="badge b3d">3D</span>' : ''}${tag}
         ${t.fmts.some(f => f !== 'MOFLEX') ? `<span class="badge bf" title="Played on an Old 3DS by converting it as it plays">${esc(t.fmts.filter(f => f !== 'MOFLEX').join(' · '))}</span>` : ''}
@@ -494,7 +507,7 @@ function renderGrid() {
       <div class="t" title="${esc(t.title)}">${esc(t.title)}</div><div class="s">${esc(sub)}</div></div>`;
   }).join('');
   $('#grid').querySelectorAll('.tile').forEach(el => {
-    const go = () => el.dataset.kind === 'show' ? showDetail(el.dataset.id) : itemDetail(el.dataset.id);
+    const go = () => el.dataset.kind === 'show' ? showDetail(el.dataset.id) : el.dataset.kind === 'group' ? groupDetail(el.dataset.id) : itemDetail(el.dataset.id);
     el.onclick = go;
     el.onkeydown = ev => { if (ev.key === 'Enter') go(); };
   });
@@ -540,13 +553,42 @@ function itemDetail(id) {
         <div class="path">${esc(it.path)}</div>
       </div>
     </div>
+    ${!it.extra && it.group ? extrasList(it.group) : ''}
     <div class="actions"><button id="dclose" style="margin-right:auto">Close</button><button id="dedit" class="admin">Edit info</button>
       <button id="dseen">${it.watched ? 'Mark unwatched' : 'Mark watched'}</button>
       <span id="dwatch"></span></div>`);
   $('#dclose').onclick = close;
   $('#dedit').onclick = () => itemDialog(id);
+  extrasWire();
   $('#dseen').onclick = async () => { await setWatched(id, !it.watched); itemDetail(id); };
   watchButtons(id, $('#dwatch'));
+}
+
+// a film's extras (trailers, featurettes, interviews...), each with Details and Watch
+function extrasList(gid) {
+  const g = (libData.groups || {})[gid]; if (!g || !g.extras.length) return '';
+  const xs = g.extras.map(x => libData.items.find(i => i.id === x)).filter(x => x && !x.missing);
+  if (!xs.length) return '';
+  return `<div class="seasons"><h4>Extras</h4>${xs.map(x =>
+    `<div class="ep"><span class="ck" title="${x.watched ? 'Watched' : ''}">${x.watched ? '✓' : ''}</span><span class="x">${esc(x.label || x.info.title || '')}</span>
+      ${progOf(x) ? `<span class="bar2" title="${fmtTime(x.pos)}"><div style="width:${progOf(x) * 100}%"></div></span>` : ''}
+      ${x.fmt ? `<span class="hint hide-sm">${esc(x.fmt)}</span>` : ''}<button class="small" data-epd="${x.id}">Details</button>
+      <button class="small primary play" data-epw="${x.id}" title="Watch">▶</button></div>`).join('')}</div>`;
+}
+function extrasWire() {
+  document.querySelectorAll('[data-epd]').forEach(b => b.onclick = () => itemDetail(b.dataset.epd));
+  document.querySelectorAll('[data-epw]').forEach(b => b.onclick = () => { close(); watch(b.dataset.epw, -1); });
+}
+// a folder of extras whose film isn't in any library
+function groupDetail(gid) {
+  const g = (libData.groups || {})[gid]; if (!g) return;
+  open(`<div class="detail"><div class="art"></div><div><h3>${esc(g.title || 'Extras')}</h3>
+      <div class="meta">${[g.year, `${g.extras.length} extra${g.extras.length === 1 ? '' : 's'}`].filter(Boolean).map(m => `<span>${esc(m)}</span>`).join('')}</div>
+      <p class="sum">The film these belong to isn't in any library. Add its folder to a library and they will be listed with it.</p></div></div>
+    ${extrasList(gid)}
+    <div class="actions"><button id="dclose" style="margin-right:auto">Close</button></div>`);
+  $('#dclose').onclick = close;
+  extrasWire();
 }
 
 // watched / not, for this browser (clears its resume point either way)
@@ -945,7 +987,7 @@ async function watch(id, at) {
   const it = libData.items.find(x => x.id === id);
   P.id = id; P.ended = false; P.audioN = -1; P.cues = []; $('#pcc').classList.remove('on');
   $('#player').hidden = false; document.body.style.overflow = 'hidden';
-  $('#ptitle').textContent = it ? (it.showId ? `${it.info.show} · S${it.info.season || 0}E${it.info.episode || 0} ${it.info.epTitle || ''}` : it.info.title) : '';
+  $('#ptitle').textContent = it ? (it.showId ? `${it.info.show} · S${it.info.season || 0}E${it.info.episode || 0} ${it.info.epTitle || ''}` : it.label || it.info.title) : '';
   pv.volume = +lsGet('bt.vol', 1); $('#pvol').value = pv.volume;
   if (at < 0) { // resume if this browser stopped part-way
     at = 0;

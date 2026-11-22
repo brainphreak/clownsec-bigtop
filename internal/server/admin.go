@@ -481,6 +481,19 @@ func (s *Server) adItems(w http.ResponseWriter, r *http.Request) {
 		DurMs    int64        `json:"dur,omitempty"`
 		Pos      int64        `json:"pos,omitempty"`     // ?client=: its resume point, ms
 		Watched  bool         `json:"watched,omitempty"` // ...and whether it has watched it
+		Extra    string       `json:"extra,omitempty"`   // an extra's kind ("interview"...)
+		Label    string       `json:"label,omitempty"`   // an extra's name as listed ("Chasing an Angel (Interview)")
+		Group    string       `json:"group,omitempty"`   // the film-with-extras group it is in
+		Foreign  bool         `json:"foreign,omitempty"` // an extra from another library, for its film here
+	}
+	// a film with extras: its film's item id ("" = none found; title / year then come from the
+	// extras' folder), and its extras in listing order. Here = the group's card belongs to this library.
+	type G struct {
+		Main   string   `json:"main,omitempty"`
+		Title  string   `json:"title,omitempty"`
+		Year   int      `json:"year,omitempty"`
+		Extras []string `json:"extras"`
+		Here   bool     `json:"here"`
 	}
 	type S struct {
 		ID       string       `json:"id"`
@@ -492,8 +505,38 @@ func (s *Server) adItems(w http.ResponseWriter, r *http.Request) {
 	}
 	items, shows := []I{}, []S{}
 	prog := s.Store.DB.Progress[clientID(r)] // the browser asking (each keeps its own, like each 3DS)
+	members := s.groupMembers()
+	groups := map[string]*G{}
+	foreign := map[string]bool{} // extras in other libraries whose film is in this one
+	for gid, m := range members {
+		sortGroup(m)
+		mine := false
+		for _, it := range m {
+			if it.Lib == id {
+				mine = true
+			}
+		}
+		if !mine {
+			continue
+		}
+		g := &G{Extras: []string{}}
+		if m[0].Extra == "" {
+			g.Main, g.Here = m[0].ID, m[0].Lib == id
+		} else if e, ok := s.groupEntry(gid, id, append([]*library.Item(nil), m...), ""); ok {
+			g.Title, g.Year, g.Here = e.Title, e.Year, true
+		}
+		for _, it := range m {
+			if it.Extra != "" {
+				g.Extras = append(g.Extras, it.ID)
+				if it.Lib != id && g.Main != "" && g.Here {
+					foreign[it.ID] = true
+				}
+			}
+		}
+		groups[gid] = g
+	}
 	for _, it := range s.Store.DB.Items {
-		if it.Lib != id {
+		if it.Lib != id && !foreign[it.ID] {
 			continue
 		}
 		x := I{ID: it.ID, Path: it.Path, Missing: it.Missing != 0, Info: it.Info(), Detected: it.Detected,
@@ -509,6 +552,10 @@ func (s *Server) adItems(w http.ResponseWriter, r *http.Request) {
 			x.ShowID = library.ShowID(id, x.Info.Show)
 			x.Kind = "episode"
 		}
+		x.Extra, x.Group, x.Foreign = it.Extra, it.Group, it.Lib != id
+		if it.Extra != "" {
+			x.Label = library.ExtraName(it.Extra, x.Info.Title)
+		}
 		items = append(items, x)
 	}
 	for _, sh := range s.Store.DB.Shows {
@@ -521,7 +568,7 @@ func (s *Server) adItems(w http.ResponseWriter, r *http.Request) {
 			items[i].Path = ""
 		}
 	}
-	writeJSON(w, map[string]any{"items": items, "shows": shows})
+	writeJSON(w, map[string]any{"items": items, "shows": shows, "groups": groups})
 }
 
 // The user's edits replace the whole Edit layer: an empty field goes back to the detected value.
