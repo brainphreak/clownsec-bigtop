@@ -142,7 +142,7 @@ func (s *Server) wants3D(r *http.Request) media.NewConverter3D {
 	if r.URL.Query().Get("conv3d") != "1" || s.Depth3D == nil || !s.Depth3D.Ready() {
 		return nil
 	}
-	return func(w, h int) (media.Converter3D, error) { return s.Depth3D.Converter(w, h) }
+	return func(w, h, ow, oh int) (media.Converter3D, error) { return s.Depth3D.Converter(w, h, ow, oh) }
 }
 
 // startStream: the job a stream request asks for, and this console's turn to run it (a stream it

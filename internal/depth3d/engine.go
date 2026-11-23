@@ -85,9 +85,13 @@ func (e *Engine) session(tier, w, h int) (*Session, error) {
 	return s, nil
 }
 
-// Converter: a converter for one stream of a w x h picture.
-func (e *Engine) Converter(w, h int) (*Converter, error) {
-	t := e.Tier()
+// Converter: a converter for one stream of a w x h picture into an outW x outH side-by-side frame.
+func (e *Engine) Converter(w, h, outW, outH int) (*Converter, error) {
+	return e.ConverterAt(e.Tier(), w, h, outW, outH)
+}
+
+// ConverterAt: the same at a given depth size (the browser has its own).
+func (e *Engine) ConverterAt(t, w, h, outW, outH int) (*Converter, error) {
 	if t < 0 {
 		return nil, errors.New("2D to 3D is off")
 	}
@@ -95,7 +99,7 @@ func (e *Engine) Converter(w, h int) (*Converter, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewConverter(s, w, h, Defaults), nil
+	return NewConverterSize(s, w, h, outW, outH, Defaults), nil
 }
 
 // Preload loads the widescreen model in the background (the shape most videos have).

@@ -964,11 +964,13 @@ async function setupWizard() {
       const t = d.test || {};
       const rows = (t.results || []).map(r => `<li>${esc(tierName(r.tier))}: depth ${r.fps.toFixed(0)} fps${r.device ? ' on ' + esc(r.device) : ''};
           Old 3DS stream ${x(r.old)}, New 3DS stream ${x(r.new)}${r.error ? ' -- ' + esc(r.error) : ''}</li>`).join('');
+      const wrows = (t.web || []).map(w => `<li>Browser stream with ${esc(tierName(w.tier))}: ${x(w.speed)}</li>`).join('');
       if (t.running) {
-        body = `<p>Testing 2D to 3D: ${esc(t.step || '')}…</p>${bar(30 + 15 * (t.results || []).length)}<ul>${rows}</ul>`;
+        body = `<p>Testing 2D to 3D: ${esc(t.step || '')}…</p>${bar(30 + 12 * ((t.results || []).length + (t.web || []).length))}<ul>${rows}${wrows}</ul>`;
       } else {
         const ok = d.offerOld || d.offerNew;
-        body = `<ul>${rows}</ul>` + (t.error ? `<p class="err">${esc(t.error)}</p>` : '') +
+        body = `<ul>${rows}${wrows}</ul>` + (t.error ? `<p class="err">${esc(t.error)}</p>` : '') +
+          (d.web ? `<p class="hint">The browser player uses ${esc(tierName(d.web))} (${x(d.webSpd)}${d.webSpd && d.webSpd < 2 ? ' -- it may pause on this computer' : ''}).</p>` : '') +
           (ok ? `<p><b>2D to 3D is on</b>, at ${esc(tierName(d.setting))}. The 3DS offers <b>Play in 3D</b> on 2D videos
                  ${d.offerOld && d.offerNew ? '' : d.offerOld ? '(an Old 3DS; a New 3DS can turn it on in VIDEO, with a warning)' : '(a New 3DS; an Old 3DS can turn it on in VIDEO, with a warning)'}.</p>`
               : d.setting ? `<p>This computer isn't quite fast enough to convert as it plays (it needs ${d.need}× real time).
@@ -1067,7 +1069,8 @@ function needHls() {
     sc.onload = () => ok(window.Hls); sc.onerror = () => no(new Error('could not load the player')); document.head.appendChild(sc); });
 }
 
-function srcLayout() { return lsGet('bt.src.' + P.id, '') || (P.sess && P.sess.frame) || '2d'; }
+// 'conv' = a 2D video Big Top converts to 3D as it plays: it arrives full side by side
+function srcLayout() { const o = lsGet('bt.src.' + P.id, ''); return o === 'conv' ? 'fsbs' : o || (P.sess && P.sess.frame) || '2d'; }
 // Every choice in the 3D menu belongs to one video: each video starts from what was detected (3D:
 // anaglyph), and a change is remembered for that video only.
 function viewMode() { return srcLayout() === '2d' ? '2d' : lsGet('bt.view.' + P.id, 'anaglyph'); }
@@ -1098,7 +1101,7 @@ async function start(at) {
     if (aud) q.set('audio', aud);
     if (ver) q.set('version', ver);
     const own = lsGet('bt.src.' + P.id, '');
-    if (own) q.set('src', own);
+    if (own === 'conv') q.set('conv3d', '1'); else if (own) q.set('src', own);
     if (bakeMode()) { q.set('view', viewMode()); if (swapped()) q.set('swap', '1'); }
     s = await api('GET', `/api/items/${P.id}/web?${q}`);
   } catch (x) { if (gen === P.gen) { spin(false); msg(esc(x.message)); } return; }
@@ -1324,7 +1327,8 @@ function menu3d() {
     <h5>This video is</h5>
     <button data-s="" class="${!own ? 'on' : ''}">As detected (${SRCS[det]})</button>
     ${Object.entries(SRCS).map(([k, l]) => `<button data-s="${k}" class="${own === k ? 'on' : ''}">${l}</button>`).join('')}
-    ${src === '2d' ? '<div class="hint">A 2D video plays in 2D. If it’s really two pictures side by side, pick its layout above.</div>' : ''}`;
+    ${P.sess && (P.sess.canConv || P.sess.conv) ? `<button data-s="conv" class="${own === 'conv' ? 'on' : ''}">2D → 3D (Big Top converts it)</button>` : ''}
+    ${src === '2d' ? `<div class="hint">A 2D video plays in 2D. If it’s really two pictures side by side, pick its layout above${P.sess && P.sess.canConv ? ', or have Big Top turn it into 3D (2D → 3D)' : ''}.</div>` : ''}`;
   m.hidden = false;
   // where Big Top draws the 3D (iPhones), a change is a new stream from here; else just a redraw
   const apply = () => { if (!elemFS || (P.sess && P.sess.baked)) start(now()); else setupRender(); menu3d(); };

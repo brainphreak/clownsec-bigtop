@@ -213,9 +213,12 @@ type webOut struct {
 	Subs     []webSub `json:"subs"` // subtitle tracks (/api/items/{id}/websubs/{n})
 	Title    string   `json:"title"`
 	Pos      int64    `json:"pos,omitempty"` // this browser's resume point, ms
+	// 2D to 3D: CanConv = this 2D video can be converted here (conv3d=1); Conv = this stream is
+	CanConv bool `json:"canConv,omitempty"`
+	Conv    bool `json:"conv,omitempty"`
 }
 
-// GET /api/items/{id}/web?at=ms&audio=n&src=2d|hsbs|fsbs&view=anaglyph|fsbs|hsbs|2d&swap=1&client=x
+// GET /api/items/{id}/web?at=ms&audio=n&src=2d|hsbs|fsbs&conv3d=1&view=anaglyph|fsbs|hsbs|2d&swap=1&client=x
 //
 // Start a browser stream; it answers once the segment holding "at" exists. src overrides the
 // file's 3D layout; view (with swap) has FFmpeg draw that 3D view into the picture.
@@ -347,6 +350,14 @@ func (s *Server) apiWeb(w http.ResponseWriter, r *http.Request) {
 		out.Audio = trackList(m.Audio, true)
 		if n, err := strconv.Atoi(q.Get("audio")); err == nil && n >= 0 && n < len(m.Audio) {
 			j.Audio, out.AudioN = m.Audio[n].Index, n
+		}
+		// 2D to 3D: a 2D video this Big Top can convert; asked for, it comes out full side-by-side
+		out.CanConv = !library.Stereo3D(label) && s.Depth3D != nil && s.Depth3D.Ready()
+		if out.CanConv && q.Get("conv3d") == "1" {
+			snap := s.Cfg.Snapshot()
+			wt := snap.Depth3DWebTier() // the browser's own depth size
+			j.Conv = func(w, h, ow, oh int) (media.Converter3D, error) { return s.Depth3D.ConverterAt(wt, w, h, ow, oh) }
+			j.Frame, out.Conv = "fsbs", true
 		}
 	}
 	if out.Dur <= 0 {

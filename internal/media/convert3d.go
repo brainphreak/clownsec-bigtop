@@ -28,8 +28,9 @@ type Converter3D interface {
 	Frame(img, sbs []byte) error
 }
 
-// NewConverter3D makes a converter for one stream (it keeps state between frames).
-type NewConverter3D func(w, h int) (Converter3D, error)
+// NewConverter3D makes a converter for one stream (it keeps state between frames): w x h pictures
+// into an outW x outH side-by-side frame.
+type NewConverter3D func(w, h, outW, outH int) (Converter3D, error)
 
 const sbsW, sbsH = 800, 240
 
@@ -48,7 +49,7 @@ func (t *Tool) Transcode3D(ctx context.Context, j Job, moflex bool, q int, newCo
 	}
 	m := j.Media
 	fw, fh := Size(m, false) // the picture inside 400x240 (its pixel aspect applied, never enlarged)
-	conv, err := newConv(fw, fh)
+	conv, err := newConv(fw, fh, sbsW, sbsH)
 	if err != nil {
 		return err
 	}

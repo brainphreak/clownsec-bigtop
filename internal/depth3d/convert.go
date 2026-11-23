@@ -2,7 +2,29 @@ package depth3d
 
 import (
 	"math"
+	"runtime"
+	"sync"
 )
+
+// rows runs f over [0,h) split into one band per CPU (the per-pixel work, ~1M pixels a frame in the
+// browser's 640x360 eyes, is otherwise one core's)
+func rows(h int, f func(y0, y1 int)) {
+	n := runtime.NumCPU()
+	if n > h {
+		n = h
+	}
+	if n <= 1 {
+		f(0, h)
+		return
+	}
+	var wg sync.WaitGroup
+	step := (h + n - 1) / n
+	for y := 0; y < h; y += step {
+		wg.Add(1)
+		go func(a, b int) { defer wg.Done(); f(a, b) }(y, min(y+step, h))
+	}
+	wg.Wait()
+}
 
 // Settings: how strong and where. The defaults were tuned on an Old 3DS against iw3's settings for
 // the 3DS (strength 1.7, convergence 0.65, edge fix, flicker reduction 0.99).
@@ -25,7 +47,9 @@ var std = [3]float32{0.229, 0.224, 0.225}
 type Converter struct {
 	S      Settings
 	sess   *Session
-	W, H   int       // the picture (inside 400x240)
+	W, H   int // the picture
+	OutW   int // the side-by-side frame: two halves of OutW/2 x OutH, the picture centred in each
+	OutH   int
 	small  []float32 // this frame at the model's size, RGB 0..1
 	prevSm []float32
 	depth  []float32 // model output
@@ -37,15 +61,21 @@ type Converter struct {
 	hist   []int
 }
 
+// NewConverter: a converter for w x h pictures into the 3DS's 800x240 side-by-side frame.
 func NewConverter(s *Session, w, h int, set Settings) *Converter {
+	return NewConverterSize(s, w, h, 800, 240, set)
+}
+
+// NewConverterSize: the same into an outW x outH side-by-side frame (the browser: 2w x h).
+func NewConverterSize(s *Session, w, h, outW, outH int, set Settings) *Converter {
 	n := s.H * s.W
-	return &Converter{S: set, sess: s, W: w, H: h, small: make([]float32, n*3), prevSm: make([]float32, n*3),
+	return &Converter{S: set, sess: s, W: w, H: h, OutW: outW, OutH: outH, small: make([]float32, n*3), prevSm: make([]float32, n*3),
 		depth: make([]float32, n), prev: make([]float32, n), full: make([]float32, w*h), tmp: make([]float32, w*h),
 		hist: make([]int, 2048)}
 }
 
-// Frame turns one picture (RGB24, W x H) into the two eyes, written into sbs (RGB24, 800x240,
-// left eye first, the picture centred in each 400x240 half; the bars are left as they are).
+// Frame turns one picture (RGB24, W x H) into the two eyes, written into sbs (RGB24, OutW x OutH,
+// left eye first, the picture centred in each half; the bars are left as they are).
 func (c *Converter) Frame(img []byte, sbs []byte) error {
 	mw, mh := c.sess.W, c.sess.H
 	resizeRGB(img, c.W, c.H, c.small, mw, mh)
@@ -105,8 +135,9 @@ func (c *Converter) Frame(img []byte, sbs []byte) error {
 	c.have = true
 
 	resizeF(c.depth, mw, mh, c.full, c.W, c.H)
-	if c.S.Edge > 0 {
-		dilateH(c.full, c.tmp, c.W, c.H, c.S.Edge)
+	if c.S.Edge > 0 { // tuned at the 3DS's 400 px: the same share of the picture at other sizes
+		e := int(float32(c.S.Edge)*float32(c.W)/400 + 0.5)
+		dilateH(c.full, c.tmp, c.W, c.H, max(1, e))
 	}
 	// disparity: total pixels between the eyes; + = in front of the screen. 0 at the side edges.
 	k := c.S.Strength / 100 * float32(c.W)
@@ -114,7 +145,17 @@ func (c *Converter) Frame(img []byte, sbs []byte) error {
 	if bw < 1 {
 		bw = 1
 	}
-	for y := 0; y < c.H; y++ {
+	rows(c.H, func(ya, yb int) { c.dispRows(k, bw, ya, yb) })
+	half := c.OutW / 2
+	px, py := (half-c.W)/2, (c.OutH-c.H)/2
+	warpBackward(img, c.full, c.W, c.H, sbs, c.OutW, px, py, -1)      // left eye
+	warpBackward(img, c.full, c.W, c.H, sbs, c.OutW, half+px, py, +1) // right eye
+	return nil
+}
+
+// dispRows: depth -> disparity (total pixels between the eyes; + = in front), 0 at the side edges
+func (c *Converter) dispRows(k, bw float32, ya, yb int) {
+	for y := ya; y < yb; y++ {
 		row := c.full[y*c.W : (y+1)*c.W]
 		for x := range row {
 			ramp := float32(1)
@@ -127,10 +168,6 @@ func (c *Converter) Frame(img []byte, sbs []byte) error {
 			row[x] = k * (row[x] - c.S.Conv) * ramp
 		}
 	}
-	px, py := (400-c.W)/2, (240-c.H)/2
-	warpBackward(img, c.full, c.W, c.H, sbs, 800, px, py, -1)     // left eye
-	warpBackward(img, c.full, c.W, c.H, sbs, 800, 400+px, py, +1) // right eye
-	return nil
 }
 
 // percentiles from a histogram (exact enough, and no sort)
@@ -170,7 +207,11 @@ func (c *Converter) percentiles(d []float32, a, b float32) (float32, float32) {
 
 // warpBackward writes one eye: each output pixel takes the picture at x + sign*disp/2 (linear).
 func warpBackward(img []byte, disp []float32, w, h int, dst []byte, dw, ox, oy int, sign float32) {
-	for y := 0; y < h; y++ {
+	rows(h, func(ya, yb int) { warpRows(img, disp, w, dst, dw, ox, oy, sign, ya, yb) })
+}
+
+func warpRows(img []byte, disp []float32, w int, dst []byte, dw, ox, oy int, sign float32, ya, yb int) {
+	for y := ya; y < yb; y++ {
 		src := img[y*w*3 : (y+1)*w*3]
 		out := dst[((oy+y)*dw+ox)*3:]
 		drow := disp[y*w : (y+1)*w]
@@ -199,7 +240,11 @@ func warpBackward(img []byte, disp []float32, w, h int, dst []byte, dw, ox, oy i
 // dilateH: near (bigger) depth spreads r pixels left and right
 func dilateH(d, tmp []float32, w, h, r int) {
 	copy(tmp, d)
-	for y := 0; y < h; y++ {
+	rows(h, func(ya, yb int) { dilateHRows(d, tmp, w, r, ya, yb) })
+}
+
+func dilateHRows(d, tmp []float32, w, r, ya, yb int) {
+	for y := ya; y < yb; y++ {
 		row, src := d[y*w:(y+1)*w], tmp[y*w:(y+1)*w]
 		for x := range row {
 			m := src[x]
@@ -219,7 +264,11 @@ func dilateH(d, tmp []float32, w, h, r int) {
 // resizeRGB: bilinear (pixel centres), RGB24 -> float RGB 0..1
 func resizeRGB(src []byte, sw, sh int, dst []float32, dw, dh int) {
 	fx, fy := float32(sw)/float32(dw), float32(sh)/float32(dh)
-	for y := 0; y < dh; y++ {
+	rows(dh, func(ya, yb int) { resizeRGBRows(src, sw, sh, dst, dw, fx, fy, ya, yb) })
+}
+
+func resizeRGBRows(src []byte, sw, sh int, dst []float32, dw int, fx, fy float32, ya, yb int) {
+	for y := ya; y < yb; y++ {
 		sy := (float32(y)+0.5)*fy - 0.5
 		y0, ty := split(sy, sh)
 		y1 := min(y0+1, sh-1)
@@ -239,7 +288,11 @@ func resizeRGB(src []byte, sw, sh int, dst []float32, dw, dh int) {
 // resizeF: bilinear for one float plane
 func resizeF(src []float32, sw, sh int, dst []float32, dw, dh int) {
 	fx, fy := float32(sw)/float32(dw), float32(sh)/float32(dh)
-	for y := 0; y < dh; y++ {
+	rows(dh, func(ya, yb int) { resizeFRows(src, sw, sh, dst, dw, fx, fy, ya, yb) })
+}
+
+func resizeFRows(src []float32, sw, sh int, dst []float32, dw int, fx, fy float32, ya, yb int) {
+	for y := ya; y < yb; y++ {
 		sy := (float32(y)+0.5)*fy - 0.5
 		y0, ty := split(sy, sh)
 		y1 := min(y0+1, sh-1)
