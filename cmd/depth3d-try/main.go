@@ -28,12 +28,45 @@ func main() {
 	mw := flag.Int("mw", 392, "model input width")
 	cpu := flag.Bool("cpu", false, "CPU only")
 	secs := flag.Float64("secs", 0, "only this many seconds")
+	pkgDir := flag.String("pkgdir", "", "install the 2D-to-3D packages into this data folder and use them (with -tier)")
+	tier := flag.Int("tier", 392, "Distill depth width for -pkgdir (322/392/448; 0 = MiDaS)")
 	bench := flag.Int("bench", 0, "no video: time the converter on this many generated 400x224 frames")
 	flag.Parse()
 	if *bench == 0 && flag.NArg() != 2 {
 		log.Fatal("usage: depth3d-try [flags] in out.mp4")
 	}
 
+	if *pkgDir != "" {
+		pk := depth3d.NewPackages(*pkgDir)
+		done := make(chan error)
+		t := time.Now()
+		go func() {
+			tiers := []int{}
+			if *tier > 0 {
+				tiers = append(tiers, *tier)
+			}
+			done <- pk.Install(tiers, *tier == 0)
+		}()
+		for wait := true; wait; {
+			select {
+			case err := <-done:
+				if err != nil {
+					log.Fatal(err)
+				}
+				wait = false
+			case <-time.After(2 * time.Second):
+				st := pk.Status()
+				log.Printf("  %s %s %d/%d MB", st.State, st.What, st.Done>>20, st.Total>>20)
+			}
+		}
+		st := pk.Status()
+		log.Printf("installed in %v: runtime=%v (%s) distill=%v midas=%v", time.Since(t).Round(time.Second), st.Installed, st.Accel, st.Models, st.MiDaS)
+		m, path, ok := pk.Model(*tier, 400, 224)
+		if !ok {
+			log.Fatal("model not installed")
+		}
+		*ortPath, *model, *inName, *outName, *mh, *mw = pk.LibPath(), path, m.Input, m.Output, m.H, m.W
+	}
 	rt, err := depth3d.Load(*ortPath)
 	if err != nil {
 		log.Fatal(err)
