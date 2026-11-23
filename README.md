@@ -58,7 +58,7 @@ the files were on the SD card.
 | Linux | 64-bit x86 (amd64) |
 | Network | on the same home network as the 3DS (wired or Wi-Fi) |
 | Videos | `.moflex`, `.mp4`, `.mkv`, `.avi` and other video files on a local drive, a USB drive or a mounted network share |
-| 2D to 3D | optional: on Windows any DirectX 12 graphics card (NVIDIA, AMD or Intel), on a Mac Apple silicon, on Linux the processor — see [2D to 3D](#2d-to-3d) |
+| 2D to 3D | optional: on Windows any DirectX 12 graphics card (NVIDIA, AMD or Intel), on a Mac Apple silicon, on Linux any graphics chip with a Vulkan driver (else the processor) — see [2D to 3D](#2d-to-3d) |
 
 Big Top is a single program file. MP4 / MKV / AVI need FFmpeg: on Windows Big Top downloads it for
 you (a bar in the setup page offers it); on a Mac `brew install ffmpeg`, on Linux your package
@@ -407,7 +407,7 @@ depth model, on your graphics card — and makes the two eyes from it as the vid
 |---|---|
 | Windows | any DirectX 12 graphics card (DirectML) — NVIDIA, AMD, Intel |
 | macOS | Apple silicon (CoreML) — not Intel Macs |
-| Linux | the processor (a fast one is needed) |
+| Linux | the graphics chip through WebGPU, on any GPU with a Vulkan driver (AMD, Intel, NVIDIA; the usual Mesa drivers work); without one, the processor (a fast one is needed) |
 
 The settings were tuned by eye on an Old 3DS (the strength and screen depth of a well-tested
 [iw3](https://github.com/nagadomi/nunif) setup, an edge fix so outlines don't double, smoothing
