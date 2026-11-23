@@ -872,6 +872,9 @@ function settingsDialog() {
         <option value="fast" ${state.encodeMode === 'fast' ? 'selected' : ''}>Fast (for slower computers)</option>
       </select></div>
     <div class="hint" id="smodehint">${modeHint(state)}</div>
+    <p class="hint">2D to 3D: ${state.depth3d ? 'on (' + esc(state.depth3d === 'midas' ? 'MiDaS' : 'depth size ' + state.depth3d) + ')' : 'off'} ·
+      <a href="#" id="wizard" style="color:var(--accent2)">${state.depth3d ? 'test again' : 'set up'}</a>
+      ${state.depth3d ? '· <a href="#" id="d3off" style="color:var(--accent2)">turn off</a>' : ''}</p>
     <p class="hint">Clownsec catalog: ${state.catalog.movies} movies, ${state.catalog.shows} shows ·
       <a href="#" id="refresh" style="color:var(--accent2)">re-read every file's info</a></p>
     <div class="err" id="xerr"></div>
@@ -904,12 +907,97 @@ function settingsDialog() {
       await loadState(); $('#smodehint').innerHTML = modeHint(state);
     } catch (x) { res.textContent = x.message; }
   };
+  $('#wizard').onclick = ev => { ev.preventDefault(); close(); setupWizard(); };
+  if ($('#d3off')) $('#d3off').onclick = async ev => { ev.preventDefault(); await api('POST', '/admin/api/depth3d/off'); await loadState(); close(); settingsDialog(); };
   $('#smode').onchange = () => { $('#smodehint').innerHTML = modeHint({ ...state, encodeMode: $('#smode').value }); };
   $('#refresh').onclick = async ev => { ev.preventDefault(); await api('POST', '/admin/api/scan?refresh=1'); close(); poll(); };
   $('#xsave').onclick = async () => {
     try { await api('PUT', '/admin/api/settings', { name: $('#sname').value, allowRemoteAdmin: $('#sremote').checked, encodeMode: $('#smode').value }); close(); refresh(); }
     catch (x) { $('#xerr').textContent = x.message; }
   };
+}
+
+
+// ---------- first-run setup: the computer's speed, and 2D to 3D ----------
+// Opens by itself the first time (state.setupDone false) and from Settings. Everything it measures
+// and picks is saved on the server, so it runs once.
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+async function setupWizard() {
+  const W = { step: 'welcome', speed: null, err: '' };
+  const finish = async () => { try { await api('POST', '/admin/api/setup/done'); } catch {} close(); refresh(); };
+  const bar = pct => `<div class="bar" style="margin:10px 0"><div style="width:${Math.max(2, Math.min(100, pct))}%"></div></div>`;
+  const tierName = t => t === 0 || t === 'midas' ? 'MiDaS (light)' : `depth size ${t}`;
+  const x = v => v ? `${v.toFixed(2)}× real time` : 'not run';
+  async function show() {
+    const d = await api('GET', '/admin/api/depth3d').catch(() => null);
+    const ff = state.ffmpeg && state.ffmpeg.found;
+    let body = '', acts = '';
+    if (W.step === 'welcome') {
+      body = `<p>Welcome to Clownsec Big Top. Two quick steps get this computer ready:</p>
+        <ol><li><b>Speed test</b> -- how fast this computer makes the moflex an Old 3DS plays MP4/MKV/AVI as (about a minute).</li>
+        <li><b>2D to 3D</b> (optional) -- watch 2D videos in 3D: this computer estimates each picture's depth as it plays.</li></ol>
+        ${ff ? '' : '<p class="err">FFmpeg isn\'t installed yet -- both tests need it. Get it from the bar at the top of the page, then open this again from Settings.</p>'}`;
+      acts = `<button id="wskip" style="margin-right:auto">Skip setup</button><button class="primary" id="wnext" ${ff ? '' : 'disabled'}>Start</button>`;
+    } else if (W.step === 'speed') {
+      body = W.speed ? `<p>Old 3DS encoding: best quality 2D ${W.speed.speed2d.toFixed(1)}×, 3D ${W.speed.speed3d.toFixed(1)}× real time;
+          Fast 2D ${W.speed.fast2d.toFixed(1)}×, 3D ${W.speed.fast3d.toFixed(1)}×. ${W.speed.useFast ? 'Old 3DS streams will use Fast.' : 'Old 3DS streams will use best quality.'}</p>`
+        : `<p>Testing… (a 20-second clip, in 2D and 3D, at best quality and at Fast)</p>${bar(50)}`;
+      acts = W.speed ? `<button class="primary" id="wnext">Next</button>` : '';
+    } else if (W.step === 'ask3d') {
+      const p = d && d.packages || {};
+      body = p.supported
+        ? `<p><b>2D to 3D</b> turns 2D videos into 3D while they play, for the 3DS and for the browser player. It needs
+            a one-time download: ONNX Runtime (${d.platform.startsWith('windows') ? 'with DirectML, for your graphics card' : d.platform.startsWith('darwin') ? 'with CoreML' : 'CPU'}, about 10-16 MB) and the
+            depth models (about 150 MB). Then a test picks the best quality this computer can keep up with.</p>
+           <p class="hint">Models: Distill-Any-Depth (MIT, AGI Lab, Westlake University) and MiDaS (MIT, Intel ISL).</p>`
+        : `<p>2D to 3D isn't available for this computer (${esc(d ? d.platform : '?')}).</p>`;
+      acts = p.supported ? `<button id="wno" style="margin-right:auto">Not now</button><button class="primary" id="wyes">Turn on 2D to 3D</button>`
+        : `<button class="primary" id="wdone">Finish</button>`;
+    } else if (W.step === 'download') {
+      const p = d.packages;
+      const pct = p.total ? 100 * p.done / p.total : 3;
+      body = p.error ? `<p class="err">The download failed: ${esc(p.error)}</p>`
+        : `<p>Downloading ${esc(p.what || '')}… ${(p.done / 1048576).toFixed(0)} of ${(p.total / 1048576).toFixed(0)} MB</p>${bar(pct)}`;
+      acts = p.error ? `<button id="wno" style="margin-right:auto">Not now</button><button class="primary" id="wyes">Try again</button>` : '';
+      if (!p.state && !p.error && p.installed) { W.step = 'test'; await api('POST', '/admin/api/depth3d/test').catch(e => W.err = e.message); return show(); }
+    } else if (W.step === 'test') {
+      const t = d.test || {};
+      const rows = (t.results || []).map(r => `<li>${esc(tierName(r.tier))}: depth ${r.fps.toFixed(0)} fps${r.device ? ' on ' + esc(r.device) : ''};
+          Old 3DS stream ${x(r.old)}, New 3DS stream ${x(r.new)}${r.error ? ' -- ' + esc(r.error) : ''}</li>`).join('');
+      if (t.running) {
+        body = `<p>Testing 2D to 3D: ${esc(t.step || '')}…</p>${bar(30 + 15 * (t.results || []).length)}<ul>${rows}</ul>`;
+      } else {
+        const ok = d.offerOld || d.offerNew;
+        body = `<ul>${rows}</ul>` + (t.error ? `<p class="err">${esc(t.error)}</p>` : '') +
+          (ok ? `<p><b>2D to 3D is on</b>, at ${esc(tierName(d.setting))}. The 3DS offers <b>Play in 3D</b> on 2D videos
+                 ${d.offerOld && d.offerNew ? '' : d.offerOld ? '(an Old 3DS; a New 3DS can turn it on in VIDEO, with a warning)' : '(a New 3DS; an Old 3DS can turn it on in VIDEO, with a warning)'}.</p>`
+              : d.setting ? `<p>This computer isn't quite fast enough to convert as it plays (it needs ${d.need}× real time).
+                 The 3DS won't offer it, but it can still be turned on in VIDEO > Format, with a warning that it may stutter.</p>`
+              : `<p>2D to 3D couldn't run here.</p>`);
+        acts = `<button class="primary" id="wdone">Finish</button>`;
+      }
+    }
+    open(`<h3>Set up Big Top</h3>${body}${W.err ? `<p class="err">${esc(W.err)}</p>` : ''}<div class="actions">${acts}</div>`);
+    const on = (id, f) => { const b = $('#' + id); if (b) b.onclick = f; };
+    on('wskip', finish);
+    on('wdone', finish);
+    on('wno', finish);
+    on('wnext', async () => {
+      if (W.step === 'welcome') {
+        W.step = 'speed'; show();
+        try { W.speed = await api('POST', '/admin/api/speedtest'); } catch (e) { W.err = e.message; W.speed = null; W.step = 'ask3d'; }
+        await loadState(); return show();
+      }
+      if (W.step === 'speed') { W.step = 'ask3d'; return show(); }
+    });
+    on('wyes', async () => {
+      W.err = '';
+      try { await api('POST', '/admin/api/depth3d/install'); W.step = 'download'; } catch (e) { W.err = e.message; }
+      show();
+    });
+    if ((W.step === 'download' || (W.step === 'test' && d && d.test && d.test.running)) && dlg.open) { await sleep(1000); if (dlg.open) show(); }
+  }
+  show();
 }
 
 // FFmpeg: MP4/MKV/AVI are transcoded for the 3DS; moflex plays without it.
@@ -1374,7 +1462,10 @@ async function poll() {
   } finally { polling = false; }
 }
 async function refresh() { await loadState(); await loadLib(); }
-refresh().then(() => { if (state.scan.running) poll(); });
+refresh().then(() => {
+  if (state.scan.running) poll();
+  if (!state.viewer && !state.setupDone) setupWizard(); // the first time: the speed test and 2D to 3D
+});
 </script>
 </body>
 </html>
