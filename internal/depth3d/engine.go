@@ -119,3 +119,42 @@ func (e *Engine) Device() string {
 	}
 	return ""
 }
+
+// Bench: how many frames a second the converter manages at tier on this computer (a widescreen
+// 400x224 picture, generated and moving; the model's cost doesn't depend on what is in it). The
+// model stays loaded afterwards.
+func (e *Engine) Bench(tier, frames int) (fps float64, device string, err error) {
+	const w, h = 400, 224
+	s, err := e.session(tier, w, h)
+	if err != nil {
+		return 0, "", err
+	}
+	c := NewConverter(s, w, h, Defaults)
+	img := make([]byte, w*h*3)
+	sbs := make([]byte, 800*240*3)
+	var tot time.Duration
+	for i := 0; i < frames+5; i++ {
+		for y := 0; y < h; y++ {
+			for x := 0; x < w; x++ {
+				v := byte((x + y + i*3) & 255)
+				if x > 100+i%200 && x < 180+i%200 && y > 60 && y < 160 {
+					v = 255 - v
+				}
+				p := (y*w + x) * 3
+				img[p], img[p+1], img[p+2] = v, byte(y), byte(x)
+			}
+		}
+		t := time.Now()
+		if err := c.Frame(img, sbs); err != nil {
+			return 0, s.Device, err
+		}
+		if i >= 5 { // the first few warm the GPU up
+			tot += time.Since(t)
+		}
+	}
+	return float64(frames) / tot.Seconds(), s.Device, nil
+}
+
+// NeedFps: what a depth size must manage to be picked -- a 30 fps video (the most a stream sends)
+// with room for the encoder, which runs at the same time on the same computer.
+const NeedFps = 40.0

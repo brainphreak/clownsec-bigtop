@@ -227,3 +227,22 @@ func pickAudio(j Job) int {
 	}
 	return m.Audio[0].Index
 }
+
+// Speed3D: how fast this computer makes a converted stream -- seconds of video per second of work
+// (1 = exactly real time), over durMs of j, the converter and the encoder running together as in
+// a real stream. A run still going at limit stops there and counts what it managed.
+func (t *Tool) Speed3D(ctx context.Context, j Job, moflex bool, newConv NewConverter3D, durMs int64, limit time.Duration) (float64, error) {
+	j.DurMs = durMs
+	ctx, cancel := context.WithTimeout(ctx, limit)
+	defer cancel()
+	t0 := time.Now()
+	err := t.Transcode3D(ctx, j, moflex, 0, newConv, io.Discard)
+	el := time.Since(t0)
+	if err != nil {
+		return 0, err
+	}
+	if ctx.Err() != nil {
+		el = limit
+	}
+	return float64(durMs) / 1000 / el.Seconds(), nil
+}

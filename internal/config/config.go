@@ -35,7 +35,22 @@ type Config struct {
 	// "448" (Distill-Any-Depth input width) or "midas"; Depth3DFps what this computer measured with it
 	Depth3D    string  `json:"depth3d,omitempty"`
 	Depth3DFps float64 `json:"depth3dFps,omitempty"`
+	// the setup's measurement of whole converted streams at that size (x real time): an Old 3DS
+	// moflex, a New 3DS H.264; the 3DS offers Play in 3D only where it is >= Depth3DMin
+	Depth3DOld float64 `json:"depth3dOld,omitempty"`
+	Depth3DNew float64 `json:"depth3dNew,omitempty"`
 	SetupDone  bool    `json:"setupDone,omitempty"` // the first-run setup (speed tests, 2D to 3D) was run
+}
+
+// Depth3DMin: a converted stream must be made this much faster than it plays to be offered.
+const Depth3DMin = 1.2
+
+// Conv3D: whether the 3DS may offer Play in 3D -- for an Old 3DS (moflex) and a New 3DS (H.264).
+func (c *Config) Conv3D() (old, new bool) {
+	if c.Depth3DTier() < 0 {
+		return false, false
+	}
+	return c.Depth3DOld >= Depth3DMin, c.Depth3DNew >= Depth3DMin
 }
 
 // Depth3DTier: the depth size as depth3d.Engine takes it (-1 = off, 0 = MiDaS).
@@ -157,5 +172,6 @@ func (c *Config) Snapshot() Config {
 	defer c.mu.Unlock()
 	return Config{Name: c.Name, ID: c.ID, Port: c.Port, AllowRemoteAdmin: c.AllowRemoteAdmin, FastMoflex: c.FastMoflex,
 		EncodeMode: c.EncodeMode, Auto3D: c.Auto3D, AutoVer: c.AutoVer,
-		Depth3D: c.Depth3D, Depth3DFps: c.Depth3DFps, SetupDone: c.SetupDone}
+		Depth3D: c.Depth3D, Depth3DFps: c.Depth3DFps, Depth3DOld: c.Depth3DOld, Depth3DNew: c.Depth3DNew,
+		SetupDone: c.SetupDone}
 }
