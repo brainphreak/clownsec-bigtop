@@ -960,7 +960,7 @@ async function setupWizard() {
       const p = d && d.packages || {};
       body = p.supported
         ? `<p><b>2D to 3D</b> turns 2D videos into 3D while they play, for the 3DS and for the browser player. It needs
-            a one-time download: ONNX Runtime (${d.platform.startsWith('windows') ? 'with DirectML, for your graphics card' : d.platform.startsWith('darwin') ? 'with CoreML' : 'CPU'}, about 10-16 MB) and the
+            a one-time download: ONNX Runtime (${d.platform.startsWith('windows') ? 'with DirectML, for your graphics card' : d.platform.startsWith('darwin') ? 'with CoreML' : 'with WebGPU, for your graphics card through Vulkan'}, about 10-16 MB) and the
             depth models (about 150 MB). Then a test picks the best quality this computer can keep up with.</p>
            <p class="hint">Models: Distill-Any-Depth (MIT, AGI Lab, Westlake University) and MiDaS (MIT, Intel ISL).</p>`
         : `<p>2D to 3D isn't available for this computer (${esc(d ? d.platform : '?')}).</p>`;

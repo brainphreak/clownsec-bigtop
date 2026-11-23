@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -44,7 +45,12 @@ const (
 	fnReleaseSession          = 95
 	fnReleaseValue            = 96
 	fnReleaseSessionOptions   = 100
-	fnAppendExecutionProvider = 216 // SessionOptionsAppendExecutionProvider(opts, name, keys, values, n)
+	fnAppendExecutionProvider = 216
+	// plugin execution providers (ORT 1.23+): the WebGPU one (Vulkan on Linux) is a separate library
+	fnRegisterEPLibrary       = 301 // RegisterExecutionProviderLibrary(env, name, path)
+	fnGetEpDevices            = 303 // GetEpDevices(env, &devices, &n)
+	fnAppendEPv2              = 304 // SessionOptionsAppendExecutionProvider_V2(opts, env, devs, n, keys, vals, nopts)
+	fnEpDeviceEpName          = 312 // EpDevice_EpName(dev) -> const char* // SessionOptionsAppendExecutionProvider(opts, name, keys, values, n)
 	ortLoggingWarning         = 2
 	ortEnableAll              = 99
 	ortSequential             = 0
@@ -62,7 +68,10 @@ type Runtime struct {
 	mem          uintptr
 	appendDML    uintptr // OrtSessionOptionsAppendExecutionProvider_DML (Windows DirectML build)
 	appendCoreML uintptr // OrtSessionOptionsAppendExecutionProvider_CoreML (macOS)
-	Version      string
+	webgpu       uintptr // the WebGPU plugin's device (Linux: Vulkan -- NVIDIA, AMD, Intel); 0 = none
+	// GPUNote: why the graphics chip isn't used, when it isn't ("" = it is, or there's none to try)
+	GPUNote string
+	Version string
 	// CacheDir: where CoreML keeps the models it compiled (compiling takes ~30 s; a cached one loads
 	// at once). The model must carry a COREML_CACHE_KEY metadata entry. "" = no cache.
 	CacheDir string
@@ -122,7 +131,66 @@ func load(path string) (*Runtime, error) {
 		return nil, err
 	}
 	runtime.KeepAlive(logid)
+	r.loadWebGPU(path)
 	return r, nil
+}
+
+// WebGPUPlugin: the WebGPU execution provider's library name (beside ONNX Runtime's).
+func WebGPUPlugin() string {
+	if runtime.GOOS == "darwin" {
+		return "libonnxruntime_providers_webgpu.dylib"
+	}
+	return "libonnxruntime_providers_webgpu.so"
+}
+
+// loadWebGPU: on Linux (DEPTH3D_WEBGPU=1 elsewhere, for testing), the WebGPU plugin beside ONNX
+// Runtime, and the graphics device it found through Vulkan. Anything missing: the processor, and why.
+func (r *Runtime) loadWebGPU(ortPath string) {
+	if runtime.GOOS != "linux" && os.Getenv("DEPTH3D_WEBGPU") != "1" {
+		return
+	}
+	plug := filepath.Join(filepath.Dir(ortPath), WebGPUPlugin())
+	if !exists(plug) {
+		r.GPUNote = "no GPU support installed -- run the 2D to 3D setup again to get it"
+		return
+	}
+	var pin runtime.Pinner
+	defer pin.Unpin()
+	name, cpath := cstr("webgpu"), cstr(plug)
+	pin.Pin(&name[0])
+	pin.Pin(&cpath[0])
+	if err := r.call(fnRegisterEPLibrary, r.env, ptr(name), ptr(cpath)); err != nil {
+		r.GPUNote = "GPU support didn't load: " + shortMsg(err)
+		log.Printf("depth3d: WebGPU plugin: %v", err)
+		return
+	}
+	var devs uintptr
+	var n uintptr
+	pin.Pin(&devs)
+	pin.Pin(&n)
+	if err := r.call(fnGetEpDevices, r.env, uintptr(unsafe.Pointer(&devs)), uintptr(unsafe.Pointer(&n))); err != nil {
+		r.GPUNote = "GPU support: " + shortMsg(err)
+		return
+	}
+	for i := uintptr(0); i < n; i++ {
+		d := *(*uintptr)(unsafe.Pointer(devs + i*unsafe.Sizeof(uintptr(0))))
+		nm, _, _ := purego.SyscallN(r.fn(fnEpDeviceEpName), d)
+		if strings.Contains(strings.ToLower(cString(nm)), "webgpu") {
+			r.webgpu = d
+			log.Printf("depth3d: using the graphics chip through WebGPU (Vulkan)")
+			return
+		}
+	}
+	r.GPUNote = "no graphics chip found through Vulkan (is libvulkan1 and the GPU's Vulkan driver installed?)"
+	log.Printf("depth3d: WebGPU found no device: %s", r.GPUNote)
+}
+
+func shortMsg(err error) string {
+	m := strings.TrimPrefix(err.Error(), "ONNX Runtime: ")
+	if len(m) > 120 {
+		m = m[:120] + "…"
+	}
+	return m
 }
 
 func (r *Runtime) fn(i int) uintptr {
@@ -188,7 +256,16 @@ func (r *Runtime) NewSession(model []byte, inName, outName string, h, w int, gpu
 	r.call(fnSetSessionGraphOptLevel, *opts, lvl)
 	r.call(fnSetIntraOpNumThreads, *opts, uintptr(max(1, runtime.NumCPU()/2)))
 	dev := "CPU"
-	if gpu && r.appendDML != 0 {
+	if gpu && r.webgpu != 0 {
+		devs := [1]uintptr{r.webgpu}
+		pin.Pin(&devs[0])
+		if err := r.call(fnAppendEPv2, *opts, r.env, uintptr(unsafe.Pointer(&devs[0])), 1, 0, 0, 0); err == nil {
+			dev = "GPU (WebGPU)"
+		} else {
+			dev = "CPU (WebGPU: " + shortMsg(err) + ")"
+			log.Printf("depth3d: WebGPU session: %v", err)
+		}
+	} else if gpu && r.appendDML != 0 {
 		// DirectML wants sequential execution and no memory pattern
 		r.call(fnSetSessionExecutionMode, *opts, ortSequential)
 		r.call(fnDisableMemPattern, *opts)
@@ -198,11 +275,7 @@ func (r *Runtime) NewSession(model []byte, inName, outName string, h, w int, gpu
 		} else {
 			// no DirectX 12 graphics (or its driver is too old): the processor, and why -- shown with the
 			// speed test, as a silent fallback looks like Big Top ignoring the graphics chip
-			msg := strings.TrimPrefix(derr.Error(), "ONNX Runtime: ")
-			if len(msg) > 120 {
-				msg = msg[:120] + "…"
-			}
-			dev = "CPU (DirectML unavailable: " + msg + ")"
+			dev = "CPU (DirectML unavailable: " + shortMsg(derr) + ")"
 			log.Printf("depth3d: DirectML unavailable, using the processor: %v", derr)
 		}
 	} else if gpu && r.appendCoreML != 0 {
@@ -214,8 +287,8 @@ func (r *Runtime) NewSession(model []byte, inName, outName string, h, w int, gpu
 			dev = "CPU (CoreML unavailable)"
 			log.Printf("depth3d: CoreML unavailable, using the processor")
 		}
-	} else if gpu && runtime.GOOS == "linux" {
-		dev = "CPU (no GPU support on Linux yet)"
+	} else if gpu && r.GPUNote != "" {
+		dev = "CPU (" + r.GPUNote + ")"
 	}
 	s := &Session{r: r, H: h, W: w, in: cstr(inName), out: cstr(outName), Device: dev,
 		buf: make([]float32, 3*h*w), x: &runScratch{}, shape: [4]int64{1, 3, int64(h), int64(w)}}
