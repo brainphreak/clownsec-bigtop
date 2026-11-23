@@ -409,11 +409,21 @@ func (s *Server) apiWeb(w http.ResponseWriter, r *http.Request) {
 
 	// answer once the first segment is there, so the player starts at once (and an FFmpeg
 	// problem shows up here, not as a stalled player)
-	if err := ws.waitSeg(r.Context(), s, int(at/(media.SegSec*1000))); err != nil {
+	k0 := int(at / (media.SegSec * 1000))
+	if err := ws.waitSeg(r.Context(), s, k0); err != nil {
 		if r.Context().Err() == nil {
 			http.Error(w, "Big Top couldn't convert this file: "+err.Error(), http.StatusInternalServerError)
 		}
 		return
+	}
+	// 2D to 3D starts slower (the converter warming up) and then runs only somewhat faster than the
+	// film plays: a few seconds in hand first, or the player catches up and pauses once at the start
+	if out.Conv {
+		if k := min(k0+3, ws.nseg-1); k > k0 {
+			if err := ws.waitSeg(r.Context(), s, k); err != nil && r.Context().Err() != nil {
+				return
+			}
+		}
 	}
 	out.URL = "/api/web/" + ws.id + "/index.m3u8"
 	writeJSON(w, out)
