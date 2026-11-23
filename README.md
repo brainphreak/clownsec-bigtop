@@ -4,16 +4,21 @@ A small media server that streams your **moflex** library from a computer to the
 [Clownsec 3DS video player](https://github.com/brainphreak/clownsec-moflex-player) — like Plex or
 Jellyfin, but for the 3DS's own video format, which they can't play.
 
-Point Big Top at the folders where your `.moflex` files are. On the 3DS, the player's **BIG TOP**
-button browses them — movies, TV shows by season, posters, descriptions, what you've watched — and
+Point Big Top at the folders where your videos are. On the 3DS, the player's **BIG TOP** button
+browses them — movies, TV shows by season, extras, posters, descriptions, what you've watched — and
 plays them over your home Wi-Fi with seeking, resume, audio tracks, subtitles and 3D, exactly as if
 the files were on the SD card.
 
-Moflex files are streamed as they are: Big Top converts nothing, so it needs almost no CPU and runs
-happily on an old PC, a laptop or a NAS-attached box.
+- **Moflex** files are streamed as they are: no conversion, almost no CPU.
+- **MP4 / MKV / AVI** (and more) are converted as they play: H.264 for a New 3DS, moflex for an
+  Old 3DS (see [The moflex encoder](#the-moflex-encoder)).
+- **2D to 3D**: any 2D video can be watched in 3D, its depth estimated as it plays — on the 3DS
+  and in the browser (see [2D to 3D](#2d-to-3d)).
+- **Info and posters** come from the Clownsec catalog, super moflex files, and
+  [TMDB](#where-the-info-and-posters-come-from) for everything else.
+- Any browser on your network can browse and watch too, and hand a stream to **VLC**.
 
-> **Status: early testing.** Moflex streaming works. MP4 / MKV / AVI (converted on the fly) and
-> online info lookup (TMDB / TVDB) are planned — see [Roadmap](#roadmap).
+> **Status: testing.** Everything above works; expect rough edges — see [Roadmap](#roadmap).
 
 ---
 
@@ -24,10 +29,11 @@ happily on an old PC, a laptop or a NAS-attached box.
 - [Connecting the 3DS](#connecting-the-3ds)
 - [Browsing and watching in a browser](#browsing-and-watching-in-a-browser)
 - [Libraries and scanning](#libraries-and-scanning)
-- [Naming your files](#naming-your-files)
+- [Naming your files](#naming-your-files) (extras too)
 - [Where the info and posters come from](#where-the-info-and-posters-come-from)
 - [Editing info](#editing-info)
 - [3D](#3d)
+- [2D to 3D](#2d-to-3d)
 - [Subtitles](#subtitles)
 - [Audio tracks](#audio-tracks)
 - [Watch progress](#watch-progress)
@@ -51,16 +57,19 @@ happily on an old PC, a laptop or a NAS-attached box.
 | macOS | macOS 11 (Big Sur) or newer — Apple silicon or Intel |
 | Linux | 64-bit x86 (amd64) |
 | Network | on the same home network as the 3DS (wired or Wi-Fi) |
-| Videos | `.moflex` files on a local drive, a USB drive or a mounted network share |
+| Videos | `.moflex`, `.mp4`, `.mkv`, `.avi` and other video files on a local drive, a USB drive or a mounted network share |
+| 2D to 3D | optional: on Windows any DirectX 12 graphics card (NVIDIA, AMD or Intel), on a Mac Apple silicon, on Linux the processor — see [2D to 3D](#2d-to-3d) |
 
-Nothing else to install: Big Top is a single program file.
+Big Top is a single program file. MP4 / MKV / AVI need FFmpeg: on Windows Big Top downloads it for
+you (a bar in the setup page offers it); on a Mac `brew install ffmpeg`, on Linux your package
+manager's `ffmpeg`.
 
 **The 3DS**
 
 | | |
 |---|---|
-| Console | **New 3DS / New 2DS XL** (the Old 3DS can't keep up with streamed moflex, 3D especially) |
-| Player | the [Clownsec player](https://github.com/brainphreak/clownsec-moflex-player) with the BIG TOP button (build 61114.31 or newer — it updates itself) |
+| Console | any 3DS / 2DS. A New 3DS plays MP4 / MKV as H.264; an Old 3DS gets them as moflex Big Top makes as they play (see [Is this computer fast enough?](#is-this-computer-fast-enough-for-an-old-3ds)) |
+| Player | the [Clownsec player](https://github.com/brainphreak/clownsec-moflex-player) — the newest build (it updates itself); PLAY IN 3D needs 61123.10 or newer |
 | Network | the same home Wi-Fi as the computer |
 
 Big Top is for your home network only — see [security](#network-ports-and-security).
@@ -143,6 +152,17 @@ program.) If a firewall is running, open TCP
 It opens by itself at **http://localhost:32500**. Open it again any time in a browser on the same
 computer. At the top it shows the server's name and the address a 3DS can use.
 
+**The first time**, a short setup runs in the page:
+
+1. **Speed test** — how fast this computer makes the moflex an Old 3DS plays MP4 / MKV as (about a
+   minute); it picks Best quality or Fast encoding.
+2. **2D to 3D** (optional) — what it is and what it downloads (about 175 MB, once). Turned on, a
+   second test finds the best depth quality this computer keeps up with, for the 3DS and for the
+   browser, and saves it.
+
+Everything is saved; **Settings → 2D to 3D → test again** runs it again (after a new graphics card,
+say), **turn off** turns it off.
+
 Big Top runs until you quit it — **Quit** in the setup page, *Quit Big Top* in the Windows tray
 menu, or closing its Terminal window (macOS) / Ctrl+C. There is no installer and nothing starts by
 itself — start Big Top when you want to watch. (To start it with Windows, put a shortcut to it in
@@ -201,6 +221,12 @@ on your network (open `http://<the Big Top computer's address>:32500/`).
   **Side by side — full** or **— half** for 3D TVs, projectors and VR viewers (go full screen), or
   **2D**. *This video is* sets the file's own layout (2D / Half SBS / Full SBS) when Big Top's guess
   from its name or super moflex info is wrong; *Swap eyes* if the depth looks inside out.
+- **2D → 3D**: with [2D to 3D](#2d-to-3d) set up, *This video is* also offers **2D → 3D** for a 2D
+  video: Big Top converts it as it plays, and every 3D view above works with it.
+- **VLC**: the **VLC** button hands the stream to VLC, from where you are, in the 3D view you picked
+  drawn into the picture — on a phone it opens the VLC app, on a computer it gives the link to paste
+  into *Media → Open Network Stream*. Handy for AR glasses and 3D TVs, which want VLC's own full
+  screen. Keep Big Top running while VLC plays.
 - **Subtitles** (CC): a super moflex's own, files beside the video and an MKV/MP4's text tracks. In
   3D each eye gets its own copy (side by side), drawn at the screen's depth. **Audio** picks the
   audio track — a super moflex's extra languages too — and the video **version** of a super moflex
@@ -232,7 +258,8 @@ A library can hold movies and TV shows together; Big Top tells them apart by nam
   unplugged); it comes back with everything intact when the file does.
 - **Removing a library** forgets its videos. **Your files are never moved, renamed or deleted** —
   Big Top only reads them, and keeps everything it learns in its own data folder.
-- Only `.moflex` files are listed for now.
+- Listed: `.moflex`, `.mp4`, `.m4v`, `.mkv`, `.avi`, `.mov`, `.webm`, `.wmv`, `.mpg` / `.mpeg`,
+  `.ts` / `.m2ts`, `.flv`, `.ogv`, `.3gp`, `.vob`.
 
 ---
 
@@ -271,6 +298,24 @@ Case, punctuation, the year and `(3D)` / `(S)` don't matter.
 numbered seasons. Episode 0 is a season's special (`S04E00`) and comes before that season's
 episode 1.
 
+### Extras
+
+Big Top follows **Plex's rules**: in a movie's folder, a video named `Title-trailer` (or
+`-featurette`, `-behindthescenes`, `-interview`, `-deleted`, `-scene`, `-short`, `-other`), or any
+video in an `Extras`, `Trailers`, `Featurettes`, `Behind The Scenes`, `Interviews`, `Deleted Scenes`,
+`Scenes`, `Shorts` or `Other` folder inside it, is an **extra** of that movie:
+
+```
+Angel (1983) {imdb-tt0086896}/Angel (1983) {imdb-tt0086896}.mkv
+Angel (1983) {imdb-tt0086896}/Chance Meeting-behindthescenes.mkv
+Angel (1983) {imdb-tt0086896}/Trailers/Angel.mkv
+```
+
+The movie is then one entry (on the 3DS "Angel (1983) +2"), its extras inside it — they are not
+listed as movies of their own. Extras find their movie by the **title and year of their folder** in
+*any* library, so a movie kept on another drive or share still gets the extras from its old folder.
+A folder name without a year only groups the files in that folder.
+
 ### 3D hints
 
 `(3D)`, `3D`, `Full SBS`, `Half SBS`, `FSBS`, `HSBS` in the name mark a video as 3D (this only labels
@@ -288,7 +333,16 @@ wins where both have a value:
    - A file that **is** a catalog file (same exact size) is recognised exactly.
    - Anything else is matched by title and year (a year off by one still matches), shows by title.
    - Gives the title, year, genres, runtime, description, the "in 3D" poster, and episode titles.
-3. **SUPER MOFLEX files** carry their own info in a trailer at the end of the file: title, year,
+3. **[TMDB](https://www.themoviedb.org)** (The Movie Database) — for a video neither the catalog
+   nor its own info identifies: found by the **IMDb id** in its folder or file name
+   (`{imdb-tt0086896}`, `tt0086896`) when there is one, else by title and year (it must match the
+   title or the year — rather nothing than a wrong film). Gives the title, year, summary, genres,
+   runtime and poster; shows get their summary, genres and poster. Each video is looked up once (a
+   network failure: again on the next scan); the first scan of a big library takes a while, in the
+   background. It works without any setup — Big Top asks through clownsec.com, which holds the
+   TMDB key — or with **your own TMDB key** (*Settings*: a v3 API key or a v4 read-access token).
+   **Settings** turns it off. *This product uses the TMDB API but is not endorsed or certified by TMDB.*
+4. **SUPER MOFLEX files** carry their own info in a trailer at the end of the file: title, year,
    genres, runtime, description, 3D flag and poster. Files made with Moflex Studio 1.7 or later also
    say what they are — movie, TV episode, short or music video — and, for an episode, its season,
    episode and episode title, while the title is the show's name (that's what groups episodes). That
@@ -296,11 +350,11 @@ wins where both have a value:
    movie stays a movie whatever its name. Older super moflex files fall back to the file name for
    season and episode (or to a summary starting `S1.E2 "Title" - ...`). To fix one's show name, open
    it in Moflex Studio, correct it and save: renaming the file doesn't change what's inside it.
-4. **Your edits** in the setup page — always win, and survive every rescan.
+5. **Your edits** in the setup page — always win, and survive every rescan.
 
 **Posters:** your own upload wins; otherwise the catalog's artwork (it's larger than the poster
 inside a super moflex) when the file is the catalog's own or nothing better exists; otherwise the
-super moflex's built-in poster. Posters are stretched to fit, never cropped.
+super moflex's built-in poster; otherwise TMDB's. Posters are stretched to fit, never cropped.
 
 In the setup page, a tile marked **CHECK** was recognised by its file name only — worth a look.
 **SUPER** marks a super moflex.
@@ -328,8 +382,37 @@ Edits are kept in Big Top's data, never written into your files.
 
 - A 3D moflex plays in 3D on the 3DS exactly as from the SD card; the 3D flag in Big Top only labels
   it in the lists.
-- The setup page's 3D choice per video: **As detected / 2D / 3D** for moflex. (For MP4 / MKV, when
-  they arrive: **2D / 3D Half SBS / 3D Full SBS**, since the 3DS must know how to split the frame.)
+- The setup page's 3D choice per video: **As detected / 2D / 3D** for moflex; **2D / 3D Half SBS /
+  3D Full SBS** for MP4 / MKV, since the 3DS must know how to split the frame.
+
+---
+
+## 2D to 3D
+
+Any 2D MP4 / MKV / AVI can be watched in 3D: Big Top estimates how far away each part of every
+picture is — with [Distill-Any-Depth](https://github.com/Westlake-AGI-Lab/Distill-Any-Depth), a
+depth model, on your graphics card — and makes the two eyes from it as the video plays.
+
+- **Turn it on** in the first-run setup, or **Settings → 2D to 3D → set up**. It downloads ONNX
+  Runtime (which runs the model) and the depth models once — about 175 MB — and tests which depth
+  quality this computer keeps up with: for the 3DS (the 3DS's stream) and for the browser (bigger
+  pictures, so it may pick a lighter one). Slower computers get the lighter MiDaS model.
+- **On the 3DS**, a 2D video offers **PLAY IN 3D** when the test showed this computer keeps up for
+  that kind of 3DS; **VIDEO → Format → 2D → 3D** turns it on or off while it plays, and works even
+  where the test said too slow (it warns that it may stutter). An Old 3DS gets a 3D moflex, a New
+  3DS side-by-side H.264.
+- **In the browser**: the 3D menu's *This video is → 2D → 3D*, then any 3D view.
+
+| | runs the depth model on |
+|---|---|
+| Windows | any DirectX 12 graphics card (DirectML) — NVIDIA, AMD, Intel |
+| macOS | Apple silicon (CoreML) — not Intel Macs |
+| Linux | the processor (a fast one is needed) |
+
+The settings were tuned by eye on an Old 3DS (the strength and screen depth of a well-tested
+[iw3](https://github.com/nagadomi/nunif) setup, an edge fix so outlines don't double, smoothing
+so depth doesn't wobble). Measured: an RTX 4090 converts at well over real time at the best quality;
+an Apple M4 manages the best quality for the 3DS and a lighter one for the browser.
 
 ---
 
@@ -490,10 +573,7 @@ The HTTP interface is described in [docs/API.md](docs/API.md).
 
 ## Roadmap
 
-- **MP4 / MKV / AVI**: converted on the fly (FFmpeg) into the H.264 stream the player already plays
-  for Plex — with 2D / Half SBS / Full SBS, and embedded subtitles (ASS included) extracted for the
-  player to draw, in 3D too.
-- **Online info** for files the Clownsec catalog doesn't know: TMDB / TVDB.
+- 2D to 3D for moflex files too (today: MP4 / MKV / AVI).
 - Your own artwork beside the videos (`Movie.jpg`, `poster.jpg`) picked up automatically.
 - Code signing (no more SmartScreen / Defender warnings).
 - A sharper icon.
@@ -542,3 +622,11 @@ The clip is from *Big Buck Bunny* (stereoscopic edition), © copyright 2008 Blen
 
 Big Top: LGPL-2.1-or-later, like the player. See [LICENSE](LICENSE). The built-in moflex encoder is
 a separate program under the GPL (see *The moflex encoder*).
+
+2D to 3D downloads, only when turned on: [ONNX Runtime](https://onnxruntime.ai) (MIT, Microsoft; on
+Windows with DirectML, redistributed with Big Top under its licence),
+[Distill-Any-Depth](https://github.com/Westlake-AGI-Lab/Distill-Any-Depth) (MIT, © 2025 AGI Lab,
+Westlake University) and [MiDaS](https://github.com/isl-org/MiDaS) v2.1 small (MIT, © 2019 Intel
+ISL), from this repository's `depth3d-v1` release. Info and posters from
+[TMDB](https://www.themoviedb.org): *this product uses the TMDB API but is not endorsed or certified
+by TMDB.*
