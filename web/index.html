@@ -238,6 +238,7 @@ body.viewer .admin { display: none !important; }   /* an inline display:flex wou
         <button class="pbtn" id="pcc" hidden title="Subtitles">CC</button>
         <button class="pbtn" id="paud" hidden title="Audio track / version">Audio</button>
         <button class="pbtn" id="p3d" title="3D view">3D</button>
+        <button class="pbtn" id="pvlc" title="Open in VLC">VLC</button>
         <button class="pbtn" id="pfs" title="Full screen (f)">⛶</button>
       </div>
     </div>
@@ -1039,6 +1040,7 @@ $('#ffbtn').onclick = async () => {
 // ---------- wiring ----------
 $('#addlib').onclick = () => libDialog(null);
 $('#setbtn').onclick = settingsDialog;
+$('#pvlc').onclick = openVLC;
 $('#updnotes').onclick = ev => { ev.preventDefault(); notesDialog(); };
 $('#updbtn').onclick = async () => {
   try { await api('POST', '/admin/api/update'); $('#updbtn').disabled = true; $('#updtext').textContent = 'Downloading…';
@@ -1146,6 +1148,46 @@ let recovering = 0;
 function recover() {
   if (Date.now() - recovering < 4000) { spin(false); msg('The stream stopped. <button class="pbtn" onclick="start(now())">Try again</button>'); return; }
   recovering = Date.now(); start(now());
+}
+
+// Open in VLC: a stream of its own for VLC (another client id, so closing this player doesn't end
+// it), from here, with this video's choices -- a 3D view drawn into the picture, as VLC has none
+// of its own (half side by side for AR glasses / 3D TVs). This player's stream stops: the computer
+// would otherwise make both.
+async function openVLC() {
+  const at = Math.round(now());
+  const q = new URLSearchParams({ at, client: webClient + '-vlc' });
+  const aud = lsGet('bt.aud.' + P.id, ''), ver = lsGet('bt.ver.' + P.id, ''), own = lsGet('bt.src.' + P.id, '');
+  if (aud) q.set('audio', aud);
+  if (ver) q.set('version', ver);
+  if (own === 'conv') q.set('conv3d', '1'); else if (own) q.set('src', own);
+  const src = srcLayout();
+  if (src !== '2d') { q.set('view', viewMode()); if (swapped()) q.set('swap', '1'); }
+  msg('Starting the stream for VLC…'); spin(true);
+  let s;
+  try { s = await api('GET', `/api/items/${P.id}/web?${q}`); } catch (x) { spin(false); msg(esc(x.message)); return; }
+  spin(false);
+  const url = location.origin + s.url;
+  pv.pause(); stopStream(true);
+  const ua = navigator.userAgent;
+  const ios = /iPhone|iPad|iPod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const app = /Android/i.test(ua) ? 'vlc://' + url : ios ? 'vlc-x-callback://x-callback-url/stream?url=' + encodeURIComponent(url) : '';
+  P.vlcAt = at;
+  msg(`<b>Playing in VLC</b><br><br>${app ? `<a class="pbtn" href="${esc(app)}">Open VLC</a><br><br>` : ''}
+    ${app ? 'Or in' : 'In'} VLC: Media › Open Network Stream, and paste:<br>
+    <input id="vlcurl" readonly value="${esc(url)}" style="width:min(90%,560px);margin:6px 0">
+    <button class="pbtn" id="vlccopy">Copy</button><br>
+    <span style="font-size:13px;opacity:.8">It starts where you were${src !== '2d' ? ', in the 3D view you picked (' + esc(VIEWS[viewMode()] || viewMode()) + ')' : ''}.
+    Keep Big Top running while you watch.</span><br><br>
+    <button class="pbtn" id="vlcback">Back to this player</button>`);
+  $('#vlccopy').onclick = () => {
+    const i = $('#vlcurl'); i.select();
+    (navigator.clipboard && window.isSecureContext ? navigator.clipboard.writeText(url) : Promise.reject())
+      .catch(() => document.execCommand('copy'));
+    $('#vlccopy').textContent = 'Copied';
+  };
+  $('#vlcback').onclick = () => { msg(''); start(P.vlcAt || 0); };
+  if (app) location.href = app; // a phone: straight to VLC
 }
 
 function stopStream(keepUI) {
