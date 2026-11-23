@@ -70,6 +70,7 @@ func main() {
 	snap := cfg.Snapshot()
 	ff.SetFastMoflex(snap.UseFast())
 	sc := &scan.Scanner{Store: store, Catalog: cat, Posters: posters, Media: ff, DataDir: dir}
+	sc.SetTMDB(!snap.TMDBOff, snap.TMDBKey) // missing movie / show info from TMDB
 	upd := update.New(version)
 	d3 := depth3d.NewEngine(depth3d.NewPackages(dir)) // 2D to 3D: its model loads ahead, in the background
 	d3.SetTier(snap.Depth3DTier())

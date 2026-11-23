@@ -43,6 +43,10 @@ type Config struct {
 	Depth3DWeb    string  `json:"depth3dWeb,omitempty"`
 	Depth3DWebSpd float64 `json:"depth3dWebSpd,omitempty"`
 	SetupDone     bool    `json:"setupDone,omitempty"` // the first-run setup (speed tests, 2D to 3D) was run
+	// TMDB: missing movie / show info from The Movie Database -- on unless TMDBOff, through
+	// clownsec.com unless TMDBKey (the user's own v3 API key or v4 read-access token)
+	TMDBOff bool   `json:"tmdbOff,omitempty"`
+	TMDBKey string `json:"tmdbKey,omitempty"`
 }
 
 // Depth3DMin: a converted stream must be made this much faster than it plays to be offered.
@@ -187,5 +191,5 @@ func (c *Config) Snapshot() Config {
 		EncodeMode: c.EncodeMode, Auto3D: c.Auto3D, AutoVer: c.AutoVer,
 		Depth3D: c.Depth3D, Depth3DFps: c.Depth3DFps, Depth3DOld: c.Depth3DOld, Depth3DNew: c.Depth3DNew,
 		Depth3DWeb: c.Depth3DWeb, Depth3DWebSpd: c.Depth3DWebSpd,
-		SetupDone: c.SetupDone}
+		SetupDone: c.SetupDone, TMDBOff: c.TMDBOff, TMDBKey: c.TMDBKey}
 }

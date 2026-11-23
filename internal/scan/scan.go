@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"crypto/sha1"
 	"encoding/hex"
+	"errors"
 	"io"
 	"io/fs"
 	"log"
@@ -21,6 +22,7 @@ import (
 	"github.com/brainphreak/clownsec-bigtop/internal/media"
 	"github.com/brainphreak/clownsec-bigtop/internal/moflex"
 	"github.com/brainphreak/clownsec-bigtop/internal/poster"
+	"github.com/brainphreak/clownsec-bigtop/internal/tmdb"
 )
 
 // Extensions Big Top lists. Everything but moflex is transcoded by FFmpeg for the 3DS.
@@ -49,6 +51,24 @@ type Scanner struct {
 	run    sync.Mutex // one scan at a time
 	mu     sync.Mutex
 	status Status
+	tmdb   *tmdb.Client // nil = TMDB off
+}
+
+// SetTMDB: fill in missing info from TMDB (key "" = through clownsec.com), or not.
+func (sc *Scanner) SetTMDB(on bool, key string) {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	if !on {
+		sc.tmdb = nil
+		return
+	}
+	sc.tmdb = tmdb.New(key)
+}
+
+func (sc *Scanner) tmdbClient() *tmdb.Client {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	return sc.tmdb
 }
 
 func (sc *Scanner) Status() Status {
@@ -225,6 +245,7 @@ func (sc *Scanner) scanLib(lib *library.Library, refresh bool) {
 		sc.Store.Lock()
 		it.Missing = 0
 		sc.Store.Unlock()
+		sc.tmdbFill(it, lib)
 		seen[it.ID] = true
 		sc.set(func(s *Status) { s.Done++ })
 	}
@@ -430,6 +451,12 @@ func (sc *Scanner) identify(it *library.Item) {
 	sc.Store.Lock()
 	defer sc.Store.Unlock()
 	it.Detected, it.Source, it.Catalog = det, source, catID
+	if source == "filename" { // nothing better than the name: TMDB (again) on this scan
+		it.TmdbVer, it.TMDB = 0, 0
+		if it.PosterBy == "tmdb" {
+			it.Poster, it.PosterBy = "", ""
+		}
+	}
 	if !library.IsMoflex(it.Path) {
 		it.Rules3D = library.Rules3DVer
 	}
@@ -518,7 +545,17 @@ func (sc *Scanner) buildShows(lib *library.Library) {
 			}
 		}
 		var art string
-		if e := sc.Catalog.Show(g.title); e != nil {
+		e := sc.Catalog.Show(g.title)
+		if e == nil && len(g.eps) > 0 { // not in the catalog: TMDB's (looked up once)
+			sc.showTMDB(sh, g.title, g.year, g.eps[0].Path)
+			if t := sh.TMDB; t != nil {
+				det.Summary, det.Genres = t.Summary, t.Genres
+				if det.Year == 0 {
+					det.Year = t.Year
+				}
+			}
+		}
+		if e != nil {
 			if e.Description != "" {
 				det.Summary = e.Description
 			}
@@ -606,6 +643,115 @@ func (sc *Scanner) buildGroups(libs []*library.Library) {
 		it.Extra, it.Group = "", ""
 		if f.key != "" && hasExtras[f.key] && !it.IsEpisode() {
 			it.Group = library.GroupID(f.key)
+		}
+	}
+}
+
+// tmdbFill: a movie identified by nothing but its file name gets TMDB's info -- found by the IMDb id
+// in its path ("{imdb-tt0086896}") when there is one, else by its title and year -- once per file.
+// A network failure leaves it for the next scan; a miss is remembered.
+func (sc *Scanner) tmdbFill(it *library.Item, lib *library.Library) {
+	c := sc.tmdbClient()
+	if c == nil {
+		return
+	}
+	sc.Store.RLock()
+	need := it.Source == "filename" && it.TmdbVer < library.TmdbVer && !it.IsEpisode() && it.Extra == ""
+	in := it.Info()
+	path := it.Path
+	sc.Store.RUnlock()
+	if !need {
+		return
+	}
+	if k, _, _ := library.ExtraOf(path, lib.Folders); k != "" {
+		return // an extra: its own name, not a film
+	}
+	sc.set(func(s *Status) { s.Current = "TMDB: " + in.Title })
+	id, tv, err := 0, false, error(nil)
+	if imdb := tmdb.IMDbID(path); imdb != "" {
+		id, tv, err = c.FindIMDb(imdb)
+	}
+	if id == 0 && in.Title != "" && (err == nil || errors.Is(err, tmdb.ErrNotFound)) {
+		id, err = c.Search(in.Title, in.Year, false, library.Norm)
+	}
+	var info tmdb.Info
+	if id > 0 {
+		info, err = c.Details(id, tv)
+	}
+	if err != nil && !errors.Is(err, tmdb.ErrNotFound) {
+		log.Printf("TMDB %s: %v", filepath.Base(path), err)
+		return
+	}
+	var pfile string
+	if id > 0 && info.Poster != "" {
+		sc.Store.RLock()
+		want := it.PosterBy != "user" && (it.Poster == "" || it.PosterBy == "tmdb")
+		sc.Store.RUnlock()
+		if want {
+			if b, err := c.Poster(info.Poster); err == nil {
+				pfile, _ = sc.Posters.SaveBytes(it.ID, b)
+			}
+		}
+	}
+	sc.Store.Lock()
+	defer sc.Store.Unlock()
+	it.TmdbVer = library.TmdbVer
+	if id == 0 {
+		return
+	}
+	d := &it.Detected
+	if info.Title != "" {
+		d.Title = info.Title
+	}
+	if info.Year > 0 {
+		d.Year = info.Year
+	}
+	d.Summary, d.Genres = info.Overview, strings.Join(info.Genres, ", ")
+	if info.Runtime > 0 && d.Runtime == 0 {
+		d.Runtime = info.Runtime
+	}
+	it.Source, it.TMDB = "tmdb", id
+	if pfile != "" {
+		it.Poster, it.PosterBy = pfile, "tmdb"
+	}
+}
+
+// showTMDB: a show the catalog doesn't know -- TMDB's summary, genres, year and poster, looked up
+// once (kept in the show, as buildShows rebuilds its info every scan).
+func (sc *Scanner) showTMDB(sh *library.Show, title string, year int, epPath string) {
+	c := sc.tmdbClient()
+	if c == nil || sh.TmdbVer >= library.TmdbVer {
+		return
+	}
+	sc.set(func(s *Status) { s.Current = "TMDB: " + title })
+	id, err := 0, error(nil)
+	if imdb := tmdb.IMDbID(epPath); imdb != "" {
+		var tv bool
+		if id, tv, err = c.FindIMDb(imdb); !tv {
+			id = 0
+		}
+	}
+	if id == 0 {
+		id, err = c.Search(title, year, true, library.Norm)
+	}
+	var info tmdb.Info
+	if id > 0 {
+		info, err = c.Details(id, true)
+	}
+	if err != nil && !errors.Is(err, tmdb.ErrNotFound) {
+		log.Printf("TMDB show %s: %v", title, err)
+		return
+	}
+	sh.TmdbVer = library.TmdbVer
+	if id == 0 {
+		return
+	}
+	sh.TMDB = &library.ShowTMDB{ID: id, Year: info.Year, Summary: info.Overview, Genres: strings.Join(info.Genres, ", ")}
+	if sh.PosterBy != "user" && sh.Poster == "" && info.Poster != "" {
+		if b, err := c.Poster(info.Poster); err == nil {
+			if fn, err := sc.Posters.SaveBytes("show-"+sh.ID, b); err == nil {
+				sh.Poster, sh.PosterBy = fn, "tmdb"
+			}
 		}
 	}
 }

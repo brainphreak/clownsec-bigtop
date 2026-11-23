@@ -118,6 +118,10 @@ type Item struct {
 	// extra); Group is set on every film and extra in a movie folder that has extras (GroupID)
 	Extra string `json:"extra,omitempty"`
 	Group string `json:"group,omitempty"`
+	// TMDB: the movie's TMDB id when its info came from there; TmdbVer: looked up (once per file,
+	// whatever came of it -- a miss isn't asked again every scan)
+	TMDB    int `json:"tmdb,omitempty"`
+	TmdbVer int `json:"tmdbv,omitempty"`
 }
 
 // Media is a non-moflex file's streams, as ffprobe reports them. Big Top transcodes these to the
@@ -181,7 +185,20 @@ type Show struct {
 	Catalog  string `json:"catalog,omitempty"`
 	Poster   string `json:"poster,omitempty"`
 	PosterBy string `json:"posterBy,omitempty"`
+	// TMDB: what TMDB said about a show the catalog doesn't know (looked up once)
+	TMDB    *ShowTMDB `json:"tmdb,omitempty"`
+	TmdbVer int       `json:"tmdbv,omitempty"`
 }
+
+type ShowTMDB struct {
+	ID      int    `json:"id"`
+	Year    int    `json:"year,omitempty"`
+	Summary string `json:"summary,omitempty"`
+	Genres  string `json:"genres,omitempty"`
+}
+
+// TmdbVer: bump when the TMDB lookup changes, so files looked up before are looked up again.
+const TmdbVer = 1
 
 func (s *Show) Info() Info { return over(s.Detected, s.Edit) }
 

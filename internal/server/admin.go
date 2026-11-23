@@ -134,6 +134,7 @@ func (s *Server) adState(w http.ResponseWriter, r *http.Request) {
 		"encodeMode": c.Mode(), "useFast": c.UseFast(), "auto3d": c.Auto3D, "version": s.Version, "addresses": lanAddresses(c.Port), "libraries": libs,
 		"scan": s.Scanner.Status(), "catalog": map[string]int{"movies": cm, "shows": cs},
 		"update": s.Updater.Status(), "ffmpeg": s.Media.Status(), "setupDone": c.SetupDone, "depth3d": c.Depth3D,
+		"tmdbOn": !c.TMDBOff, "tmdbOwnKey": c.TMDBKey != "", // the key itself never leaves Big Top
 	})
 }
 
@@ -196,6 +197,8 @@ func (s *Server) adSettings(w http.ResponseWriter, r *http.Request) {
 		AllowRemoteAdmin *bool   `json:"allowRemoteAdmin"`
 		FastMoflex       *bool   `json:"fastMoflex"` // before encodeMode: true = "fast"
 		EncodeMode       *string `json:"encodeMode"`
+		TMDBOn           *bool   `json:"tmdbOn"`
+		TMDBKey          *string `json:"tmdbKey"` // "" = through clownsec.com again
 	}
 	if err := readJSON(r, &in); err != nil {
 		bad(w, err.Error())
@@ -215,10 +218,17 @@ func (s *Server) adSettings(w http.ResponseWriter, r *http.Request) {
 			c.EncodeMode = *in.EncodeMode
 		}
 		c.FastMoflex = false // EncodeMode says it now
+		if in.TMDBOn != nil {
+			c.TMDBOff = !*in.TMDBOn
+		}
+		if in.TMDBKey != nil {
+			c.TMDBKey = strings.TrimSpace(*in.TMDBKey)
+		}
 	})
 	if err == nil {
 		c := s.Cfg.Snapshot()
 		s.Media.SetFastMoflex(c.UseFast())
+		s.Scanner.SetTMDB(!c.TMDBOff, c.TMDBKey)
 	}
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

@@ -875,6 +875,13 @@ function settingsDialog() {
     <p class="hint">2D to 3D: ${state.depth3d ? 'on (' + esc(state.depth3d === 'midas' ? 'MiDaS' : 'depth size ' + state.depth3d) + ')' : 'off'} ·
       <a href="#" id="wizard" style="color:var(--accent2)">${state.depth3d ? 'test again' : 'set up'}</a>
       ${state.depth3d ? '· <a href="#" id="d3off" style="color:var(--accent2)">turn off</a>' : ''}</p>
+    <label><input type="checkbox" id="stmdb" style="width:auto" ${state.tmdbOn ? 'checked' : ''}>
+      Fill in missing movie and TV info and posters from TMDB</label>
+    <div class="hint">For videos the Clownsec catalog doesn't know: found by the IMDb id in a folder or file name
+      (<code>{imdb-tt0086896}</code>), else by title and year. Asks through clownsec.com, or with your own
+      <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener" style="color:var(--accent2)">TMDB key</a>:</div>
+    <div style="max-width:420px">${field('stmdbkey', 'Your TMDB key (optional)', '', state.tmdbOwnKey ? 'set -- leave empty to keep it, or type "none"' : 'API key or read-access token')}</div>
+    <p class="hint">This product uses the TMDB API but is not endorsed or certified by TMDB.</p>
     <p class="hint">Clownsec catalog: ${state.catalog.movies} movies, ${state.catalog.shows} shows ·
       <a href="#" id="refresh" style="color:var(--accent2)">re-read every file's info</a></p>
     <div class="err" id="xerr"></div>
@@ -912,7 +919,10 @@ function settingsDialog() {
   $('#smode').onchange = () => { $('#smodehint').innerHTML = modeHint({ ...state, encodeMode: $('#smode').value }); };
   $('#refresh').onclick = async ev => { ev.preventDefault(); await api('POST', '/admin/api/scan?refresh=1'); close(); poll(); };
   $('#xsave').onclick = async () => {
-    try { await api('PUT', '/admin/api/settings', { name: $('#sname').value, allowRemoteAdmin: $('#sremote').checked, encodeMode: $('#smode').value }); close(); refresh(); }
+    const k = $('#stmdbkey').value.trim();
+    const body = { name: $('#sname').value, allowRemoteAdmin: $('#sremote').checked, encodeMode: $('#smode').value, tmdbOn: $('#stmdb').checked };
+    if (k) body.tmdbKey = k.toLowerCase() === 'none' ? '' : k; // empty: keep what is set
+    try { await api('PUT', '/admin/api/settings', body); close(); refresh(); }
     catch (x) { $('#xerr').textContent = x.message; }
   };
 }
