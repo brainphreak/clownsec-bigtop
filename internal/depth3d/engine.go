@@ -102,14 +102,20 @@ func (e *Engine) ConverterAt(t, w, h, outW, outH int) (*Converter, error) {
 	return NewConverterSize(s, w, h, outW, outH, Defaults), nil
 }
 
-// Preload loads the widescreen model in the background (the shape most videos have).
-func (e *Engine) Preload() {
+// Preload loads the widescreen models in the background (the shape most videos have): the 3DS's
+// depth size and any others given (the browser's).
+func (e *Engine) Preload(more ...int) {
 	if !e.Ready() {
 		return
 	}
 	go func() {
-		if _, err := e.session(e.Tier(), 400, 224); err != nil {
-			log.Printf("2D to 3D: %v", err)
+		for _, t := range append([]int{e.Tier()}, more...) {
+			if t < 0 {
+				continue
+			}
+			if _, err := e.session(t, 400, 224); err != nil {
+				log.Printf("2D to 3D: %v", err)
+			}
 		}
 	}()
 }
