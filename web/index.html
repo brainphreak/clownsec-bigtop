@@ -880,8 +880,11 @@ function settingsDialog() {
   $('#updcheck').onclick = async ev => {
     ev.preventDefault(); $('#updres').textContent = ' checking…';
     try { const u = await api('POST', '/admin/api/update/check');
-          $('#updres').textContent = u.available ? ` — ${u.latest} is available (see the bar at the top)` : ' — this is the latest version';
-          await loadState(); }
+          await loadState();
+          if (u.available) { // update from here: the bar's own button sits behind this window
+            $('#updres').innerHTML = ` — ${esc(u.latest)} is available. <button class="small primary" id="updnow">Update now</button>`;
+            $('#updnow').onclick = () => { close(); $('#updbtn').click(); };
+          } else $('#updres').textContent = ' — this is the latest version'; }
     catch (x) { $('#updres').textContent = ' — ' + x.message; }
   };
   $('#spdtest').onclick = async ev => {
