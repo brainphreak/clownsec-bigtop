@@ -51,6 +51,11 @@ func (s *Server) adminRoutes(m *http.ServeMux) {
 	a("POST /admin/api/quit", s.adQuit)
 	a("POST /admin/api/ffmpeg/download", s.adFFmpegDownload)
 	a("POST /admin/api/speedtest", s.adSpeedTest)
+	a("GET /admin/api/depth3d", s.adDepth3D)
+	a("POST /admin/api/depth3d/install", s.adDepth3DInstall)
+	a("POST /admin/api/depth3d/test", s.adDepth3DTest)
+	a("POST /admin/api/depth3d/off", s.adDepth3DOff)
+	a("POST /admin/api/setup/done", s.adSetupDone)
 	// the page shows posters through the same URLs the 3DS uses
 }
 
@@ -128,7 +133,7 @@ func (s *Server) adState(w http.ResponseWriter, r *http.Request) {
 		"name": c.Name, "id": c.ID, "port": c.Port, "allowRemoteAdmin": c.AllowRemoteAdmin,
 		"encodeMode": c.Mode(), "useFast": c.UseFast(), "auto3d": c.Auto3D, "version": s.Version, "addresses": lanAddresses(c.Port), "libraries": libs,
 		"scan": s.Scanner.Status(), "catalog": map[string]int{"movies": cm, "shows": cs},
-		"update": s.Updater.Status(), "ffmpeg": s.Media.Status(),
+		"update": s.Updater.Status(), "ffmpeg": s.Media.Status(), "setupDone": c.SetupDone, "depth3d": c.Depth3D,
 	})
 }
 

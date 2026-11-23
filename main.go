@@ -21,6 +21,7 @@ import (
 
 	"github.com/brainphreak/clownsec-bigtop/internal/catalog"
 	"github.com/brainphreak/clownsec-bigtop/internal/config"
+	"github.com/brainphreak/clownsec-bigtop/internal/depth3d"
 	"github.com/brainphreak/clownsec-bigtop/internal/discovery"
 	"github.com/brainphreak/clownsec-bigtop/internal/library"
 	"github.com/brainphreak/clownsec-bigtop/internal/media"
@@ -70,8 +71,11 @@ func main() {
 	ff.SetFastMoflex(snap.UseFast())
 	sc := &scan.Scanner{Store: store, Catalog: cat, Posters: posters, Media: ff, DataDir: dir}
 	upd := update.New(version)
+	d3 := depth3d.NewEngine(depth3d.NewPackages(dir)) // 2D to 3D: its model loads ahead, in the background
+	d3.SetTier(snap.Depth3DTier())
+	d3.Preload(snap.Depth3DWebTier()) // the 3DS's depth size, and the browser's
 	srv := &server.Server{Cfg: cfg, Store: store, Scanner: sc, Posters: posters, Catalog: cat, Version: version,
-		Updater: upd, Media: ff, DataDir: dir}
+		Updater: upd, Media: ff, DataDir: dir, Depth3D: d3}
 	srv.Quit = func() { store.Save(); appExit(0) }
 	srv.Restart = func(newPath string) error {
 		// the new build, with this run's options (and no second browser tab: the page reconnects)

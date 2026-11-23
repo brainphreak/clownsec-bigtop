@@ -14,6 +14,7 @@ import (
 
 	"github.com/brainphreak/clownsec-bigtop/internal/catalog"
 	"github.com/brainphreak/clownsec-bigtop/internal/config"
+	"github.com/brainphreak/clownsec-bigtop/internal/depth3d"
 	"github.com/brainphreak/clownsec-bigtop/internal/library"
 	"github.com/brainphreak/clownsec-bigtop/internal/media"
 	"github.com/brainphreak/clownsec-bigtop/internal/poster"
@@ -29,7 +30,8 @@ type Server struct {
 	Catalog *catalog.Catalog
 	Version string
 	Updater *update.Updater
-	Media   *media.Tool // FFmpeg: MP4/MKV/AVI streaming
+	Media   *media.Tool     // FFmpeg: MP4/MKV/AVI streaming
+	Depth3D *depth3d.Engine // 2D to 3D for the streams (conv3d=1)
 	DataDir string
 	Quit    func()                     // stop Big Top (the setup page's Quit button)
 	Restart func(newPath string) error // start this new build and exit (after an update)
@@ -103,6 +105,9 @@ type Entry struct {
 	AudioTracks []TrackOut `json:"audioTracks,omitempty"` // stream.ts?audio=n
 	BurnSubs    []TrackOut `json:"burnSubs,omitempty"`    // stream.ts?burn=n (picture subtitles)
 	StreamErr   string     `json:"streamErr,omitempty"`   // why it can't be streamed now (shown on the 3DS)
+	// Conv3D: a 2D stream that can be converted to 3D (stream.ts / stream.moflex with conv3d=1)
+	// when the server can (/api/server conv3dOld / conv3dNew)
+	Conv3D bool `json:"conv3d,omitempty"`
 }
 
 // groupsOK: the console lists films with extras as groups (X-BigTop-Features: groups). An older
@@ -213,6 +218,7 @@ func (s *Server) itemEntry(it *library.Item, client string, full bool) Entry {
 	}
 	if !library.IsMoflex(it.Path) {
 		e.Stream = true
+		e.Conv3D = !library.Stereo3D(in.Is3D)
 		if full && !s.Media.Available() {
 			e.StreamErr = "This video needs FFmpeg on the Big Top computer. Open Big Top's setup page to get it."
 		} else if full && it.Media == nil {
@@ -240,7 +246,13 @@ func writeJSON(w http.ResponseWriter, v any) {
 
 func (s *Server) apiServer(w http.ResponseWriter, r *http.Request) {
 	c := s.Cfg.Snapshot()
-	writeJSON(w, map[string]any{"service": "clownsec-bigtop", "name": c.Name, "id": c.ID, "version": s.Version})
+	// 2D to 3D: conv3d = it can be asked for (set up here); conv3dOld / conv3dNew = this computer's
+	// setup test showed it streams fast enough for that kind of 3DS (the 3DS offers it then, and
+	// otherwise lets it be turned on by hand with a warning)
+	avail := s.Depth3D != nil && s.Depth3D.Ready()
+	old, nw := c.Conv3D()
+	writeJSON(w, map[string]any{"service": "clownsec-bigtop", "name": c.Name, "id": c.ID, "version": s.Version,
+		"conv3d": avail, "conv3dOld": avail && old, "conv3dNew": avail && nw})
 }
 
 // GET /api/nettest?kb=n: n KB (at most 32 MB, default 4 MB) of data that doesn't compress, for the

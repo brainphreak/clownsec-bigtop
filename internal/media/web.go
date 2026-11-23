@@ -1,11 +1,13 @@
 package media
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -56,7 +58,17 @@ type WebJob struct {
 	AltRate, AltChans int
 
 	noReadrate bool // an FFmpeg older than 6.1 doesn't know -readrate_initial_burst
+
+	// Conv: a 2D video converted to 3D as it plays (internal/depth3d): the picture goes through it
+	// and comes out full side-by-side (Frame "fsbs"), each eye at most WebEyeW x WebEyeH
+	Conv NewConverter3D
+	// DurMs / NoPace: the setup's speed test -- this much of the video, as fast as it goes
+	DurMs  int64
+	NoPace bool
 }
+
+// the browser's 2D-to-3D eye size: sharper than the 3DS's 400x240, still quick to convert
+const WebEyeW, WebEyeH = 640, 360
 
 // StartMs is where in the film the job starts.
 func (j WebJob) StartMs() int64 { return int64(j.Seg) * SegSec * 1000 }
@@ -183,6 +195,9 @@ func (t *Tool) WebTranscode(ctx context.Context, j WebJob, dir string) error {
 	if ff == "" {
 		return errors.New("ffmpeg not found")
 	}
+	if j.Conv != nil && !j.Moflex {
+		return t.webTranscode3D(ctx, j, dir, ff)
+	}
 	cmd := exec.CommandContext(ctx, ff, WebArgs(j, dir)...)
 	hideWindow(cmd)
 	playbackPriority(cmd)
@@ -207,4 +222,173 @@ func (t *Tool) WebTranscode(ctx context.Context, j WebJob, dir string) error {
 		return fmt.Errorf("%v: %s", err, strings.TrimSpace(stderr.String()))
 	}
 	return err
+}
+
+// webTranscode3D: a 2D video converted to 3D for the browser. FFmpeg decodes from the job's start
+// (paced like every browser stream), the converter makes full side-by-side frames, and a second
+// FFmpeg encodes them -- through the chosen view, as for a real 3D file -- into the HLS segments,
+// the audio from the file.
+func (t *Tool) webTranscode3D(ctx context.Context, j WebJob, dir, ff string) error {
+	m := j.Media
+	sar := m.SAR
+	if sar <= 0 {
+		sar = 1
+	}
+	dw, dh := float64(m.W)*sar, float64(m.H)
+	f := min(float64(WebEyeW)/dw, float64(WebEyeH)/dh, 1)
+	fw, fh := int(dw*f)&^1, int(dh*f)&^1
+	if fw < 16 || fh < 16 {
+		return errors.New("the picture is too small to convert")
+	}
+	conv, err := j.Conv(fw, fh, 2*fw, fh)
+	if err != nil {
+		return err
+	}
+	num, den := m.FpsNum, m.FpsDen
+	if num <= 0 || den <= 0 {
+		num, den = 24000, 1001
+	}
+	if float64(num)/float64(den) > 30.5 {
+		den *= 2
+	}
+	start := float64(j.StartMs()) / 1000
+	parent := ctx
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	da := []string{"-hide_banner", "-nostdin", "-v", "error"}
+	if !j.noReadrate && !j.NoPace {
+		da = append(da, "-readrate", "1.5", "-readrate_initial_burst", "60")
+	}
+	if start > 0 {
+		da = append(da, "-ss", fmt.Sprintf("%.3f", start))
+	}
+	da = append(da, "-i", j.Path)
+	if j.DurMs > 0 {
+		da = append(da, "-t", fmt.Sprintf("%.3f", float64(j.DurMs)/1000))
+	}
+	var chain []string
+	if m.Interl {
+		chain = append(chain, "yadif")
+	}
+	chain = append(chain, fmt.Sprintf("fps=%d/%d", num, den), fmt.Sprintf("scale=%d:%d:flags=area", fw, fh), "setsar=1")
+	da = append(da, "-map", fmt.Sprintf("0:%d", m.Video), "-vf", strings.Join(chain, ","),
+		"-an", "-sn", "-dn", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1")
+	dec := exec.CommandContext(ctx, ff, da...)
+	hideWindow(dec)
+	playbackPriority(dec)
+	var decErr bytes.Buffer
+	dec.Stderr = &limited{&decErr, 4096}
+	dout, err := dec.StdoutPipe()
+	if err != nil {
+		return err
+	}
+
+	vf := append([]string{"setsar=1"}, bake("fsbs", j.View, j.Swap)...)
+	vf = append(vf, "format=yuv420p")
+	ea := []string{"-hide_banner", "-nostdin", "-v", "error",
+		"-f", "rawvideo", "-pix_fmt", "rgb24", "-s", fmt.Sprintf("%dx%d", 2*fw, fh),
+		"-framerate", fmt.Sprintf("%d/%d", num, den), "-i", "pipe:0"}
+	if start > 0 {
+		ea = append(ea, "-ss", fmt.Sprintf("%.3f", start))
+	}
+	ea = append(ea, "-i", j.Path, "-map", "0:v", "-vf", strings.Join(vf, ","))
+	if a := pickAudio(Job{Media: m, Audio: j.Audio}); a >= 0 {
+		ea = append(ea, "-map", fmt.Sprintf("1:%d", a))
+	}
+	ea = append(ea, "-sn", "-dn",
+		"-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-maxrate", "6M", "-bufsize", "12M",
+		"-profile:v", "high", "-pix_fmt", "yuv420p", "-force_key_frames", fmt.Sprintf("expr:gte(t,n_forced*%d)", SegSec),
+		"-c:a", "aac", "-ac", "2", "-ar", "48000", "-b:a", "160k", "-shortest",
+		"-output_ts_offset", fmt.Sprintf("%.3f", start),
+		"-f", "hls", "-hls_time", fmt.Sprint(SegSec), "-hls_list_size", "0", "-start_number", fmt.Sprint(j.Seg),
+		"-hls_flags", "independent_segments+temp_file", "-muxdelay", "0", "-muxpreload", "0",
+		"-hls_segment_filename", filepath.Join(dir, "s%05d.ts"), filepath.Join(dir, "ffmpeg.m3u8"))
+	enc := exec.CommandContext(ctx, ff, ea...)
+	hideWindow(enc)
+	playbackPriority(enc)
+	var encErr bytes.Buffer
+	enc.Stderr = &limited{&encErr, 4096}
+	ein, err := enc.StdinPipe()
+	if err != nil {
+		return err
+	}
+	dec.WaitDelay, enc.WaitDelay = 3*time.Second, 3*time.Second
+	if err := dec.Start(); err != nil {
+		return err
+	}
+	if err := enc.Start(); err != nil {
+		cancel()
+		dec.Wait()
+		return err
+	}
+	convErr := make(chan error, 1)
+	go func() {
+		defer ein.Close()
+		r := bufio.NewReaderSize(dout, fw*fh*3*2)
+		img := make([]byte, fw*fh*3)
+		sbs := make([]byte, 2*fw*fh*3)
+		for {
+			if _, err := io.ReadFull(r, img); err != nil {
+				convErr <- nil
+				return
+			}
+			if err := conv.Frame(img, sbs); err != nil {
+				convErr <- err
+				cancel()
+				return
+			}
+			if _, err := ein.Write(sbs); err != nil {
+				convErr <- nil
+				return
+			}
+		}
+	}()
+	eerr := enc.Wait()
+	cancel()
+	derr := dec.Wait()
+	cerr := <-convErr
+	if parent.Err() != nil {
+		return nil // stopped on purpose (another place, or the browser went away)
+	}
+	if derr != nil && !j.noReadrate && strings.Contains(decErr.String(), "readrate") {
+		j.noReadrate = true // an older FFmpeg: again, without the pacing
+		return t.webTranscode3D(parent, j, dir, ff)
+	}
+	switch {
+	case cerr != nil:
+		return fmt.Errorf("2D to 3D: %w", cerr)
+	case eerr != nil && encErr.Len() > 0:
+		return fmt.Errorf("%v: %s", eerr, strings.TrimSpace(encErr.String()))
+	case decErr.Len() > 0:
+		return fmt.Errorf("decode: %s", strings.TrimSpace(decErr.String()))
+	}
+	return nil
+}
+
+// SpeedWeb3D: how fast this computer makes a browser 2D-to-3D stream (x real time), over durMs
+// of the video, unpaced, into a scratch folder.
+func (t *Tool) SpeedWeb3D(ctx context.Context, m *library.Media, path string, conv NewConverter3D, durMs int64, limit time.Duration, scratch string) (float64, error) {
+	ff, _ := t.Paths()
+	if ff == "" {
+		return 0, errors.New("ffmpeg not found")
+	}
+	dir, err := os.MkdirTemp(scratch, "speed3d-")
+	if err != nil {
+		return 0, err
+	}
+	defer os.RemoveAll(dir)
+	ctx, cancel := context.WithTimeout(ctx, limit)
+	defer cancel()
+	t0 := time.Now()
+	err = t.webTranscode3D(ctx, WebJob{Path: path, Media: m, Audio: -1, Frame: "fsbs", View: "fsbs", Conv: conv,
+		DurMs: durMs, NoPace: true}, dir, ff)
+	el := time.Since(t0)
+	if err != nil {
+		return 0, err
+	}
+	if ctx.Err() != nil {
+		el = limit
+	}
+	return float64(durMs) / 1000 / el.Seconds(), nil
 }

@@ -213,9 +213,12 @@ type webOut struct {
 	Subs     []webSub `json:"subs"` // subtitle tracks (/api/items/{id}/websubs/{n})
 	Title    string   `json:"title"`
 	Pos      int64    `json:"pos,omitempty"` // this browser's resume point, ms
+	// 2D to 3D: CanConv = this 2D video can be converted here (conv3d=1); Conv = this stream is
+	CanConv bool `json:"canConv,omitempty"`
+	Conv    bool `json:"conv,omitempty"`
 }
 
-// GET /api/items/{id}/web?at=ms&audio=n&src=2d|hsbs|fsbs&view=anaglyph|fsbs|hsbs|2d&swap=1&client=x
+// GET /api/items/{id}/web?at=ms&audio=n&src=2d|hsbs|fsbs&conv3d=1&view=anaglyph|fsbs|hsbs|2d&swap=1&client=x
 //
 // Start a browser stream; it answers once the segment holding "at" exists. src overrides the
 // file's 3D layout; view (with swap) has FFmpeg draw that 3D view into the picture.
@@ -348,6 +351,14 @@ func (s *Server) apiWeb(w http.ResponseWriter, r *http.Request) {
 		if n, err := strconv.Atoi(q.Get("audio")); err == nil && n >= 0 && n < len(m.Audio) {
 			j.Audio, out.AudioN = m.Audio[n].Index, n
 		}
+		// 2D to 3D: a 2D video this Big Top can convert; asked for, it comes out full side-by-side
+		out.CanConv = !library.Stereo3D(label) && s.Depth3D != nil && s.Depth3D.Ready()
+		if out.CanConv && q.Get("conv3d") == "1" {
+			snap := s.Cfg.Snapshot()
+			wt := snap.Depth3DWebTier() // the browser's own depth size
+			j.Conv = func(w, h, ow, oh int) (media.Converter3D, error) { return s.Depth3D.ConverterAt(wt, w, h, ow, oh) }
+			j.Frame, out.Conv = "fsbs", true
+		}
 	}
 	if out.Dur <= 0 {
 		http.Error(w, "Big Top can't tell how long this video is", http.StatusUnsupportedMediaType)
@@ -398,11 +409,21 @@ func (s *Server) apiWeb(w http.ResponseWriter, r *http.Request) {
 
 	// answer once the first segment is there, so the player starts at once (and an FFmpeg
 	// problem shows up here, not as a stalled player)
-	if err := ws.waitSeg(r.Context(), s, int(at/(media.SegSec*1000))); err != nil {
+	k0 := int(at / (media.SegSec * 1000))
+	if err := ws.waitSeg(r.Context(), s, k0); err != nil {
 		if r.Context().Err() == nil {
 			http.Error(w, "Big Top couldn't convert this file: "+err.Error(), http.StatusInternalServerError)
 		}
 		return
+	}
+	// 2D to 3D starts slower (the converter warming up) and then runs only somewhat faster than the
+	// film plays: a few seconds in hand first, or the player catches up and pauses once at the start
+	if out.Conv {
+		if k := min(k0+3, ws.nseg-1); k > k0 {
+			if err := ws.waitSeg(r.Context(), s, k); err != nil && r.Context().Err() != nil {
+				return
+			}
+		}
 	}
 	out.URL = "/api/web/" + ws.id + "/index.m3u8"
 	writeJSON(w, out)

@@ -31,6 +31,54 @@ type Config struct {
 	EncodeMode string  `json:"encodeMode,omitempty"`
 	Auto3D     float64 `json:"auto3d,omitempty"`  // Auto's measurement: best-quality 3D, x real time
 	AutoVer    string  `json:"autoVer,omitempty"` // the Big Top version that measured it (an update measures again)
+	// 2D to 3D (internal/depth3d): "" off, else the depth size the setup picked -- "322", "392",
+	// "448" (Distill-Any-Depth input width) or "midas"; Depth3DFps what this computer measured with it
+	Depth3D    string  `json:"depth3d,omitempty"`
+	Depth3DFps float64 `json:"depth3dFps,omitempty"`
+	// the setup's measurement of whole converted streams at that size (x real time): an Old 3DS
+	// moflex, a New 3DS H.264; the 3DS offers Play in 3D only where it is >= Depth3DMin
+	Depth3DOld float64 `json:"depth3dOld,omitempty"`
+	Depth3DNew float64 `json:"depth3dNew,omitempty"`
+	// the browser's own depth size (its eyes are bigger, its encode heavier) and its measured speed
+	Depth3DWeb    string  `json:"depth3dWeb,omitempty"`
+	Depth3DWebSpd float64 `json:"depth3dWebSpd,omitempty"`
+	SetupDone     bool    `json:"setupDone,omitempty"` // the first-run setup (speed tests, 2D to 3D) was run
+}
+
+// Depth3DMin: a converted stream must be made this much faster than it plays to be offered.
+const Depth3DMin = 1.2
+
+// Conv3D: whether the 3DS may offer Play in 3D -- for an Old 3DS (moflex) and a New 3DS (H.264).
+func (c *Config) Conv3D() (old, new bool) {
+	if c.Depth3DTier() < 0 {
+		return false, false
+	}
+	return c.Depth3DOld >= Depth3DMin, c.Depth3DNew >= Depth3DMin
+}
+
+// Depth3DWebTier: the browser's depth size (-1 = the 3DS's, for a setup from before it was measured).
+func (c *Config) Depth3DWebTier() int {
+	if c.Depth3DWeb == "" {
+		return c.Depth3DTier()
+	}
+	return tierOf(c.Depth3DWeb)
+}
+
+// Depth3DTier: the depth size as depth3d.Engine takes it (-1 = off, 0 = MiDaS).
+func (c *Config) Depth3DTier() int { return tierOf(c.Depth3D) }
+
+func tierOf(v string) int {
+	switch v {
+	case "322":
+		return 322
+	case "392":
+		return 392
+	case "448":
+		return 448
+	case "midas":
+		return 0
+	}
+	return -1
 }
 
 // AutoMinSpeed: Auto picks Best quality when 3D encodes at least this much faster than it plays.
@@ -136,5 +184,8 @@ func (c *Config) Snapshot() Config {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return Config{Name: c.Name, ID: c.ID, Port: c.Port, AllowRemoteAdmin: c.AllowRemoteAdmin, FastMoflex: c.FastMoflex,
-		EncodeMode: c.EncodeMode, Auto3D: c.Auto3D, AutoVer: c.AutoVer}
+		EncodeMode: c.EncodeMode, Auto3D: c.Auto3D, AutoVer: c.AutoVer,
+		Depth3D: c.Depth3D, Depth3DFps: c.Depth3DFps, Depth3DOld: c.Depth3DOld, Depth3DNew: c.Depth3DNew,
+		Depth3DWeb: c.Depth3DWeb, Depth3DWebSpd: c.Depth3DWebSpd,
+		SetupDone: c.SetupDone}
 }
