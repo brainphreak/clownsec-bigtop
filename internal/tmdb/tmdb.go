@@ -234,6 +234,104 @@ func (c *Client) Search(title string, year int, tv bool, norm func(string) strin
 	return best, nil
 }
 
+// Hit is one search result, for a person to pick from.
+type Hit struct {
+	ID     int
+	TV     bool
+	Title  string
+	Year   int
+	Poster string
+}
+
+// Lookup: what a person typed in a search box -- an IMDb id (or an imdb.com link) finds that one
+// film or show; anything else is searched as a movie title, then a show title (a year at the end,
+// "Title (1994)" or "Title 1994", narrows it).
+func (c *Client) Lookup(q string) ([]Hit, error) {
+	if imdb := IMDbID(q); imdb != "" {
+		var r struct {
+			Movies []result `json:"movie_results"`
+			TV     []result `json:"tv_results"`
+		}
+		var p struct {
+			Movies []struct {
+				Poster string `json:"poster_path"`
+			} `json:"movie_results"`
+			TV []struct {
+				Poster string `json:"poster_path"`
+			} `json:"tv_results"`
+		}
+		if err := c.getRaw("find", url.Values{"imdb": {imdb}}, &r, &p); err != nil {
+			return nil, err
+		}
+		var out []Hit
+		for i, x := range r.Movies {
+			out = append(out, Hit{x.ID, false, x.Title, yearOf(x.Release), p.Movies[i].Poster})
+		}
+		for i, x := range r.TV {
+			out = append(out, Hit{x.ID, true, x.Name, yearOf(x.FirstAir), p.TV[i].Poster})
+		}
+		return out, nil
+	}
+	q = strings.TrimSpace(q)
+	year := 0
+	if m := reYearEnd.FindStringSubmatch(q); m != nil {
+		year, _ = strconv.Atoi(m[1])
+		q = strings.TrimSpace(q[:len(q)-len(m[0])])
+	}
+	if q == "" {
+		return nil, nil
+	}
+	var out []Hit
+	for _, tv := range []bool{false, true} {
+		qn, a := "search_movie", url.Values{"query": {q}}
+		if tv {
+			qn = "search_tv"
+		}
+		if year > 0 {
+			a.Set("year", strconv.Itoa(year))
+		}
+		var r struct {
+			Results []struct {
+				result
+				Poster string `json:"poster_path"`
+			} `json:"results"`
+		}
+		if err := c.get(qn, a, &r); err != nil {
+			if errors.Is(err, ErrNotFound) {
+				continue
+			}
+			return out, err
+		}
+		for i, x := range r.Results {
+			if i >= 8 {
+				break
+			}
+			h := Hit{x.ID, tv, x.Title, yearOf(x.Release), x.Poster}
+			if tv {
+				h.Title, h.Year = x.Name, yearOf(x.FirstAir)
+			}
+			out = append(out, h)
+		}
+	}
+	return out, nil
+}
+
+var reYearEnd = regexp.MustCompile(`\s*\(?((?:18|19|20)\d\d)\)?$`)
+
+// getRaw: one lookup decoded into several shapes.
+func (c *Client) getRaw(q string, a url.Values, outs ...any) error {
+	var raw json.RawMessage
+	if err := c.get(q, a, &raw); err != nil {
+		return err
+	}
+	for _, o := range outs {
+		if err := json.Unmarshal(raw, o); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Details: a movie's (tv: a show's) info.
 func (c *Client) Details(id int, tv bool) (Info, error) {
 	q := "movie"

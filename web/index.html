@@ -761,8 +761,8 @@ function itemDialog(id) {
         ${ep ? '' : `<div class="row"><div style="max-width:240px"><label for="ekind">Type</label><select id="ekind">
           <option value="">As detected (${KIND1[d.kind || 'movie']})</option>
           ${['movie', 'short', 'musicvideo'].map(k => `<option value="${k}" ${e.kind === k ? 'selected' : ''}>${KIND1[k]}</option>`).join('')}</select></div></div>`}
-        ${ep ? '' : `<label>Not the right movie? Find it in the Clownsec catalog</label>
-          <div class="row"><input id="cq" placeholder="Search the catalog…" value="${esc(it.info.title)}"><button id="cgo" style="flex:none">Search</button></div>
+        ${ep ? '' : `<label>Not the right movie? Find it in the Clownsec catalog or on TMDB (a title, or an IMDb id like tt0109040)</label>
+          <div class="row"><input id="cq" placeholder="Title, Title (1994), or tt0109040…" value="${esc(it.info.title)}"><button id="cgo" style="flex:none">Search</button></div>
           <div id="cres"></div>`}
       </div>
     </div>
@@ -785,10 +785,12 @@ function itemDialog(id) {
   };
   if (!ep) {
     const search = async () => {
+      $('#cres').innerHTML = '<div class="hint">Searching…</div>';
       const r = await api('GET', '/admin/api/catalog?q=' + encodeURIComponent($('#cq').value));
       $('#cres').innerHTML = `<div class="picker">${r.map(c => `<div data-c="${esc(c.id)}"><img src="${esc(c.art)}" alt="" loading="lazy">
-        <span>${esc(c.title)} (${c.year})${c.type === 'tvshow' ? ' · TV' : ''}</span></div>`).join('') || '<div>No match in the catalog.</div>'}</div>`;
+        <span>${esc(c.title)} (${c.year || '?'})${c.type === 'tvshow' ? ' · TV' : ''}${c.id.startsWith('tmdb:') ? ' · TMDB' : ''}</span></div>`).join('') || '<div>No match in the catalog or on TMDB.</div>'}</div>`;
       $('#cres').querySelectorAll('[data-c]').forEach(el => el.onclick = async () => {
+        $('#cres').innerHTML = '<div class="hint">Getting its info…</div>';
         await api('POST', `/admin/api/items/${id}/match?catalog=` + encodeURIComponent(el.dataset.c));
         bust = Date.now(); await loadLib(); itemDialog(id);
       });

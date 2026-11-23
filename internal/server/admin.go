@@ -3,12 +3,15 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
@@ -19,6 +22,7 @@ import (
 	"github.com/brainphreak/clownsec-bigtop/internal/config"
 	"github.com/brainphreak/clownsec-bigtop/internal/library"
 	"github.com/brainphreak/clownsec-bigtop/internal/media"
+	"github.com/brainphreak/clownsec-bigtop/internal/tmdb"
 	"github.com/brainphreak/clownsec-bigtop/web"
 )
 
@@ -703,6 +707,10 @@ func (s *Server) adShowPoster(w http.ResponseWriter, r *http.Request) {
 
 // Pick the catalog entry a file is: its info becomes the item's edit layer, its art the poster.
 func (s *Server) adMatchItem(w http.ResponseWriter, r *http.Request) {
+	if m := reTmdbPick.FindStringSubmatch(r.URL.Query().Get("catalog")); m != nil {
+		s.adMatchTMDB(w, r, m[1] == "tvshow", m[2])
+		return
+	}
 	e := s.Catalog.ByID(r.URL.Query().Get("catalog"))
 	if e == nil {
 		bad(w, "No such catalog entry.")
@@ -738,6 +746,48 @@ func (s *Server) adMatchItem(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+var reTmdbPick = regexp.MustCompile(`^tmdb:(movie|tvshow):(\d+)$`)
+
+// adMatchTMDB: a file is this TMDB movie (or show): its info becomes the item's edit layer, the poster too.
+func (s *Server) adMatchTMDB(w http.ResponseWriter, r *http.Request, tv bool, tid string) {
+	c := s.Scanner.TMDB()
+	if c == nil {
+		bad(w, "TMDB lookups are turned off in Settings.")
+		return
+	}
+	n, _ := strconv.Atoi(tid)
+	info, err := c.Details(n, tv)
+	if err != nil {
+		bad(w, "TMDB: "+err.Error())
+		return
+	}
+	id := r.PathValue("id")
+	var fn string
+	if info.Poster != "" {
+		if b, err := c.Poster(info.Poster); err == nil {
+			fn, _ = s.Posters.SaveBytes(id, b)
+		}
+	}
+	s.Store.Lock()
+	it := s.Store.DB.Items[id]
+	if it != nil {
+		ed := it.Edit
+		ed.Title, ed.Year, ed.Summary = info.Title, info.Year, info.Overview
+		ed.Genres, ed.Runtime = strings.Join(info.Genres, ", "), info.Runtime
+		it.Edit, it.TMDB, it.TmdbVer = ed, n, library.TmdbVer
+		if fn != "" {
+			it.Poster, it.PosterBy = fn, "user"
+		}
+	}
+	s.Store.Unlock()
+	if it == nil {
+		http.NotFound(w, r)
+		return
+	}
+	s.Store.Dirty()
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) adCatalogSearch(w http.ResponseWriter, r *http.Request) {
 	type C struct {
 		ID    string `json:"id"`
@@ -746,9 +796,29 @@ func (s *Server) adCatalogSearch(w http.ResponseWriter, r *http.Request) {
 		Type  string `json:"type"`
 		Art   string `json:"art"`
 	}
+	q := r.URL.Query().Get("q")
 	out := []C{}
-	for _, e := range s.Catalog.Search(r.URL.Query().Get("q"), 30) {
-		out = append(out, C{e.ID, e.Title, e.Year, e.Type, e.ArtURL()})
+	if tmdb.IMDbID(q) == "" {
+		for _, e := range s.Catalog.Search(q, 30) {
+			out = append(out, C{e.ID, e.Title, e.Year, e.Type, e.ArtURL()})
+		}
+	}
+	// and TMDB's (the catalog first: its entries carry the 3D art)
+	if c := s.Scanner.TMDB(); c != nil && strings.TrimSpace(q) != "" {
+		hits, err := c.Lookup(q)
+		if err != nil && len(hits) == 0 && !errors.Is(err, tmdb.ErrNotFound) {
+			log.Printf("TMDB search: %v", err)
+		}
+		for _, h := range hits {
+			t, art := "movie", ""
+			if h.TV {
+				t = "tvshow"
+			}
+			if h.Poster != "" {
+				art = "https://image.tmdb.org/t/p/w154" + h.Poster
+			}
+			out = append(out, C{fmt.Sprintf("tmdb:%s:%d", t, h.ID), h.Title, h.Year, t, art})
+		}
 	}
 	writeJSON(w, out)
 }

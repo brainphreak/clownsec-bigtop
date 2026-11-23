@@ -65,6 +65,9 @@ func (sc *Scanner) SetTMDB(on bool, key string) {
 	sc.tmdb = tmdb.New(key)
 }
 
+// TMDB: the TMDB client (nil = TMDB lookups are off), for the setup page's searches.
+func (sc *Scanner) TMDB() *tmdb.Client { return sc.tmdbClient() }
+
 func (sc *Scanner) tmdbClient() *tmdb.Client {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
