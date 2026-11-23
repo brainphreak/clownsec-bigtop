@@ -83,8 +83,16 @@ func (s *Server) apiStream(w http.ResponseWriter, r *http.Request) {
 	defer done()
 	w.Header().Set("Content-Type", "video/mp2t")
 	w.Header().Set("Cache-Control", "no-store")
+	conv := s.wants3D(r)
 	w.WriteHeader(http.StatusOK)
-	if err := s.Media.Transcode(ctx, j, flushWriter{w, http.NewResponseController(w)}); err != nil {
+	fw := flushWriter{w, http.NewResponseController(w)}
+	if conv != nil {
+		if err := s.Media.Transcode3D(ctx, j, false, 0, conv, fw); err != nil {
+			log.Printf("2D-to-3D stream %s: %v", filepath.Base(j.Path), err)
+		}
+		return
+	}
+	if err := s.Media.Transcode(ctx, j, fw); err != nil {
 		log.Printf("transcode %s: %v", filepath.Base(j.Path), err)
 	}
 }
@@ -114,10 +122,27 @@ func (s *Server) apiStreamMoflex(w http.ResponseWriter, r *http.Request) {
 	q, _ := strconv.Atoi(r.URL.Query().Get("q"))
 	w.Header().Set("Content-Type", "video/x-moflex")
 	w.Header().Set("Cache-Control", "no-store")
+	conv := s.wants3D(r)
 	w.WriteHeader(http.StatusOK)
-	if err := s.Media.TranscodeMoflex(ctx, j, layout, q, flushWriter{w, http.NewResponseController(w)}); err != nil {
+	fw := flushWriter{w, http.NewResponseController(w)}
+	if conv != nil {
+		if err := s.Media.Transcode3D(ctx, j, true, q, conv, fw); err != nil {
+			log.Printf("2D-to-3D moflex stream %s: %v", filepath.Base(j.Path), err)
+		}
+		return
+	}
+	if err := s.Media.TranscodeMoflex(ctx, j, layout, q, fw); err != nil {
 		log.Printf("moflex stream %s: %v", filepath.Base(j.Path), err)
 	}
+}
+
+// wants3D: conv3d=1 on a stream asks for the 2D video converted to 3D (full side-by-side 800x240);
+// nil when not asked, or 2D to 3D isn't set up here (the stream is then plain 2D).
+func (s *Server) wants3D(r *http.Request) media.NewConverter3D {
+	if r.URL.Query().Get("conv3d") != "1" || s.Depth3D == nil || !s.Depth3D.Ready() {
+		return nil
+	}
+	return func(w, h int) (media.Converter3D, error) { return s.Depth3D.Converter(w, h) }
 }
 
 // startStream: the job a stream request asks for, and this console's turn to run it (a stream it

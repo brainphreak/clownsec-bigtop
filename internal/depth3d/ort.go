@@ -108,7 +108,11 @@ func load(path string) (*Runtime, error) {
 	}
 	r.appendDML, _ = symbol(lib, "OrtSessionOptionsAppendExecutionProvider_DML")
 	r.appendCoreML, _ = symbol(lib, "OrtSessionOptionsAppendExecutionProvider_CoreML")
+	var pin runtime.Pinner // everything ONNX Runtime is handed an address of stays put (Go moves stacks)
+	defer pin.Unpin()
 	logid := cstr("bigtop")
+	pin.Pin(&logid[0])
+	pin.Pin(r)
 	if err := r.call(fnCreateEnv, ortLoggingWarning, ptr(logid), uintptr(unsafe.Pointer(&r.env))); err != nil {
 		return nil, err
 	}
@@ -147,48 +151,61 @@ func (r *Runtime) release(i int, p uintptr) {
 
 // Session is one loaded model with a fixed input size (fixed = fast on CoreML / DirectML).
 type Session struct {
+	mu      sync.Mutex // one frame at a time (several streams can share a session)
 	r       *Runtime
 	s       uintptr
 	H, W    int    // the model's input size
 	in, out []byte // tensor names (C strings)
 	Device  string // what runs it: "DirectML", "CoreML", "CPU"
 	buf     []float32
+	x       *runScratch
 	shape   [4]int64
+}
+
+// runScratch: what Run hands ONNX Runtime the addresses of
+type runScratch struct {
+	in, res, data          uintptr
+	inNames, outNames, ins [1]uintptr
 }
 
 // NewSession loads a model (bytes of an .onnx file) taking a 1x3xHxW float picture and giving a
 // 1xHxW depth map. gpu: try the platform's accelerator first.
 func (r *Runtime) NewSession(model []byte, inName, outName string, h, w int, gpu bool) (*Session, error) {
-	var opts uintptr
-	if err := r.call(fnCreateSessionOptions, uintptr(unsafe.Pointer(&opts))); err != nil {
+	var pin runtime.Pinner
+	defer pin.Unpin()
+	opts := new(uintptr)
+	pin.Pin(opts)
+	if err := r.call(fnCreateSessionOptions, uintptr(unsafe.Pointer(opts))); err != nil {
 		return nil, err
 	}
-	defer r.release(fnReleaseSessionOptions, opts)
+	defer func() { r.release(fnReleaseSessionOptions, *opts) }()
 	lvl := uintptr(ortEnableAll)
 	if v := os.Getenv("DEPTH3D_OPT"); v != "" { // testing: 0 none, 1 basic, 2 extended, 99 all
 		fmt.Sscan(v, &lvl)
 	}
-	r.call(fnSetSessionGraphOptLevel, opts, lvl)
-	r.call(fnSetIntraOpNumThreads, opts, uintptr(max(1, runtime.NumCPU()/2)))
+	r.call(fnSetSessionGraphOptLevel, *opts, lvl)
+	r.call(fnSetIntraOpNumThreads, *opts, uintptr(max(1, runtime.NumCPU()/2)))
 	dev := "CPU"
 	if gpu && r.appendDML != 0 {
 		// DirectML wants sequential execution and no memory pattern
-		r.call(fnSetSessionExecutionMode, opts, ortSequential)
-		r.call(fnDisableMemPattern, opts)
-		if st, _, _ := purego.SyscallN(r.appendDML, opts, 0); r.status(st) == nil {
+		r.call(fnSetSessionExecutionMode, *opts, ortSequential)
+		r.call(fnDisableMemPattern, *opts)
+		if st, _, _ := purego.SyscallN(r.appendDML, *opts, 0); r.status(st) == nil {
 			dev = "DirectML"
 		}
 	} else if gpu && r.appendCoreML != 0 {
-		if r.coreml(opts) == nil {
+		if r.coreml(*opts) == nil {
 			dev = "CoreML"
-		} else if st, _, _ := purego.SyscallN(r.appendCoreML, opts, coremlFlagCreateMLProgram); r.status(st) == nil {
+		} else if st, _, _ := purego.SyscallN(r.appendCoreML, *opts, coremlFlagCreateMLProgram); r.status(st) == nil {
 			dev = "CoreML"
 		}
 	}
 	s := &Session{r: r, H: h, W: w, in: cstr(inName), out: cstr(outName), Device: dev,
-		buf: make([]float32, 3*h*w), shape: [4]int64{1, 3, int64(h), int64(w)}}
+		buf: make([]float32, 3*h*w), x: &runScratch{}, shape: [4]int64{1, 3, int64(h), int64(w)}}
+	pin.Pin(s)
+	pin.Pin(&model[0])
 	err := r.call(fnCreateSessionFromArray, r.env, uintptr(unsafe.Pointer(&model[0])), uintptr(len(model)),
-		opts, uintptr(unsafe.Pointer(&s.s)))
+		*opts, uintptr(unsafe.Pointer(&s.s)))
 	runtime.KeepAlive(model)
 	if err != nil {
 		return nil, err
@@ -210,12 +227,19 @@ func (r *Runtime) coreml(opts uintptr) error {
 	}
 	var keep [][]byte
 	keys, vals := make([]uintptr, len(kv)), make([]uintptr, len(kv))
+	var pin runtime.Pinner
+	defer pin.Unpin()
 	for i, p := range kv {
 		k, v := cstr(p[0]), cstr(p[1])
+		pin.Pin(&k[0])
+		pin.Pin(&v[0])
 		keep = append(keep, k, v)
 		keys[i], vals[i] = ptr(k), ptr(v)
 	}
 	name := cstr("CoreML")
+	pin.Pin(&name[0])
+	pin.Pin(&keys[0])
+	pin.Pin(&vals[0])
 	err := r.call(fnAppendExecutionProvider, opts, ptr(name), uintptr(unsafe.Pointer(&keys[0])),
 		uintptr(unsafe.Pointer(&vals[0])), uintptr(len(kv)))
 	runtime.KeepAlive(keep)
@@ -231,27 +255,30 @@ func (s *Session) Input() []float32 { return s.buf }
 // Run estimates depth from Input() into out (H*W values, bigger = nearer).
 func (s *Session) Run(out []float32) error {
 	r := s.r
-	var in, res uintptr
+	x := s.x // the call's scratch, in the Session (on the heap, so it stays where ONNX Runtime writes)
+	var pin runtime.Pinner
+	defer pin.Unpin()
+	pin.Pin(s)
+	pin.Pin(x)
+	pin.Pin(&s.buf[0])
+	pin.Pin(&s.in[0])
+	pin.Pin(&s.out[0])
+	x.in, x.res, x.data = 0, 0, 0
 	if err := r.call(fnCreateTensorWithData, r.mem, uintptr(unsafe.Pointer(&s.buf[0])), uintptr(len(s.buf)*4),
-		uintptr(unsafe.Pointer(&s.shape[0])), 4, ortTensorFloat, uintptr(unsafe.Pointer(&in))); err != nil {
+		uintptr(unsafe.Pointer(&s.shape[0])), 4, ortTensorFloat, uintptr(unsafe.Pointer(&x.in))); err != nil {
 		return err
 	}
-	defer r.release(fnReleaseValue, in)
-	inNames := [1]uintptr{ptr(s.in)}
-	outNames := [1]uintptr{ptr(s.out)}
-	ins := [1]uintptr{in}
-	err := r.call(fnRun, s.s, 0, uintptr(unsafe.Pointer(&inNames[0])), uintptr(unsafe.Pointer(&ins[0])), 1,
-		uintptr(unsafe.Pointer(&outNames[0])), 1, uintptr(unsafe.Pointer(&res)))
-	runtime.KeepAlive(s)
-	if err != nil {
+	defer r.release(fnReleaseValue, x.in)
+	x.inNames[0], x.outNames[0], x.ins[0] = ptr(s.in), ptr(s.out), x.in
+	if err := r.call(fnRun, s.s, 0, uintptr(unsafe.Pointer(&x.inNames[0])), uintptr(unsafe.Pointer(&x.ins[0])), 1,
+		uintptr(unsafe.Pointer(&x.outNames[0])), 1, uintptr(unsafe.Pointer(&x.res))); err != nil {
 		return err
 	}
-	defer r.release(fnReleaseValue, res)
-	var data uintptr
-	if err := r.call(fnGetTensorMutableData, res, uintptr(unsafe.Pointer(&data))); err != nil {
+	defer r.release(fnReleaseValue, x.res)
+	if err := r.call(fnGetTensorMutableData, x.res, uintptr(unsafe.Pointer(&x.data))); err != nil {
 		return err
 	}
-	copy(out, unsafe.Slice((*float32)(unsafe.Pointer(data)), s.H*s.W))
+	copy(out, unsafe.Slice((*float32)(unsafe.Pointer(x.data)), s.H*s.W))
 	return nil
 }
 

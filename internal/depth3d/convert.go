@@ -49,6 +49,7 @@ func NewConverter(s *Session, w, h int, set Settings) *Converter {
 func (c *Converter) Frame(img []byte, sbs []byte) error {
 	mw, mh := c.sess.W, c.sess.H
 	resizeRGB(img, c.W, c.H, c.small, mw, mh)
+	c.sess.mu.Lock()
 	in := c.sess.Input()
 	plane := mw * mh
 	for i := 0; i < plane; i++ {
@@ -56,7 +57,9 @@ func (c *Converter) Frame(img []byte, sbs []byte) error {
 			in[k*plane+i] = (c.small[i*3+k] - mean[k]) / std[k]
 		}
 	}
-	if err := c.sess.Run(c.depth); err != nil {
+	err := c.sess.Run(c.depth)
+	c.sess.mu.Unlock()
+	if err != nil {
 		return err
 	}
 	// a scene cut (the picture changed a lot): no smoothing across it

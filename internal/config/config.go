@@ -31,6 +31,26 @@ type Config struct {
 	EncodeMode string  `json:"encodeMode,omitempty"`
 	Auto3D     float64 `json:"auto3d,omitempty"`  // Auto's measurement: best-quality 3D, x real time
 	AutoVer    string  `json:"autoVer,omitempty"` // the Big Top version that measured it (an update measures again)
+	// 2D to 3D (internal/depth3d): "" off, else the depth size the setup picked -- "322", "392",
+	// "448" (Distill-Any-Depth input width) or "midas"; Depth3DFps what this computer measured with it
+	Depth3D    string  `json:"depth3d,omitempty"`
+	Depth3DFps float64 `json:"depth3dFps,omitempty"`
+	SetupDone  bool    `json:"setupDone,omitempty"` // the first-run setup (speed tests, 2D to 3D) was run
+}
+
+// Depth3DTier: the depth size as depth3d.Engine takes it (-1 = off, 0 = MiDaS).
+func (c *Config) Depth3DTier() int {
+	switch c.Depth3D {
+	case "322":
+		return 322
+	case "392":
+		return 392
+	case "448":
+		return 448
+	case "midas":
+		return 0
+	}
+	return -1
 }
 
 // AutoMinSpeed: Auto picks Best quality when 3D encodes at least this much faster than it plays.
@@ -136,5 +156,6 @@ func (c *Config) Snapshot() Config {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return Config{Name: c.Name, ID: c.ID, Port: c.Port, AllowRemoteAdmin: c.AllowRemoteAdmin, FastMoflex: c.FastMoflex,
-		EncodeMode: c.EncodeMode, Auto3D: c.Auto3D, AutoVer: c.AutoVer}
+		EncodeMode: c.EncodeMode, Auto3D: c.Auto3D, AutoVer: c.AutoVer,
+		Depth3D: c.Depth3D, Depth3DFps: c.Depth3DFps, SetupDone: c.SetupDone}
 }

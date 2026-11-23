@@ -14,6 +14,7 @@ import (
 
 	"github.com/brainphreak/clownsec-bigtop/internal/catalog"
 	"github.com/brainphreak/clownsec-bigtop/internal/config"
+	"github.com/brainphreak/clownsec-bigtop/internal/depth3d"
 	"github.com/brainphreak/clownsec-bigtop/internal/library"
 	"github.com/brainphreak/clownsec-bigtop/internal/media"
 	"github.com/brainphreak/clownsec-bigtop/internal/poster"
@@ -29,7 +30,8 @@ type Server struct {
 	Catalog *catalog.Catalog
 	Version string
 	Updater *update.Updater
-	Media   *media.Tool // FFmpeg: MP4/MKV/AVI streaming
+	Media   *media.Tool     // FFmpeg: MP4/MKV/AVI streaming
+	Depth3D *depth3d.Engine // 2D to 3D for the streams (conv3d=1)
 	DataDir string
 	Quit    func()                     // stop Big Top (the setup page's Quit button)
 	Restart func(newPath string) error // start this new build and exit (after an update)
