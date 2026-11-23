@@ -43,6 +43,7 @@ left out.
 | Field | Type | |
 |---|---|---|
 | `type` | string | `movie`, `show`, `season`, `episode` or `group` (a film with extras, see below) |
+| `conv3d` | bool | a 2D stream Big Top can convert to 3D (see *2D to 3D*) |
 | `id` | string | |
 | `title` | string | an episode's own title (or "Episode N") |
 | `year` | int | |
@@ -71,7 +72,20 @@ left out.
 ```json
 {"service":"clownsec-bigtop","name":"Living Room PC","id":"6f0ffc0094a1ac94","version":"261114.0306"}
 ```
-A client can use this to check that an address really is a Big Top.
+A client can use this to check that an address really is a Big Top. A Big Top with 2D to 3D set up
+also says `"conv3d": true` (2D streams can be converted, see below), and `"conv3dOld"` /
+`"conv3dNew"` when its setup test measured that this computer converts fast enough for an Old 3DS
+(moflex) / a New 3DS (H.264) -- the player offers *Play in 3D* then, and otherwise lets it be turned
+on by hand with a warning.
+
+### 2D to 3D
+
+On a 2D MP4/MKV/AVI stream (its Entry has `"conv3d": true`), `conv3d=1` asks Big Top to convert it
+to 3D as it plays: `GET /api/items/{id}/stream.ts?...&fmt=1&conv3d=1` gives full side-by-side
+800x240 H.264 (New 3DS), `GET /api/items/{id}/stream.moflex?...&conv3d=1` a 3D moflex (Old 3DS), and
+the browser player's `GET /api/items/{id}/web?...&conv3d=1` full side-by-side for any of its views.
+The depth is estimated by Distill-Any-Depth (or MiDaS on slower computers) through ONNX Runtime,
+which Big Top downloads when 2D to 3D is turned on in its setup page (release `depth3d-v1`).
 
 ### `GET /api/libraries`
 ```json
