@@ -346,11 +346,17 @@ func unzip(zipPath, dir string) error {
 			continue
 		}
 		name := filepath.Base(zf.Name)
+		dst := filepath.Join(dir, name)
+		// already here, whole: kept -- a runtime Big Top has loaded is locked on Windows, and setting
+		// 2D to 3D up again would fail on it ("being used by another process")
+		if fi, err := os.Stat(dst); err == nil && fi.Size() == int64(zf.UncompressedSize64) {
+			continue
+		}
 		rc, err := zf.Open()
 		if err != nil {
 			return err
 		}
-		out, err := os.OpenFile(filepath.Join(dir, name), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755)
+		out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755)
 		if err != nil {
 			rc.Close()
 			return err
