@@ -11,8 +11,10 @@ package depth3d
 import (
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"unsafe"
 
@@ -190,15 +192,30 @@ func (r *Runtime) NewSession(model []byte, inName, outName string, h, w int, gpu
 		// DirectML wants sequential execution and no memory pattern
 		r.call(fnSetSessionExecutionMode, *opts, ortSequential)
 		r.call(fnDisableMemPattern, *opts)
-		if st, _, _ := purego.SyscallN(r.appendDML, *opts, 0); r.status(st) == nil {
+		st, _, _ := purego.SyscallN(r.appendDML, *opts, 0)
+		if derr := r.status(st); derr == nil { // status frees st: read it once
 			dev = "DirectML"
+		} else {
+			// no DirectX 12 graphics (or its driver is too old): the processor, and why -- shown with the
+			// speed test, as a silent fallback looks like Big Top ignoring the graphics chip
+			msg := strings.TrimPrefix(derr.Error(), "ONNX Runtime: ")
+			if len(msg) > 120 {
+				msg = msg[:120] + "…"
+			}
+			dev = "CPU (DirectML unavailable: " + msg + ")"
+			log.Printf("depth3d: DirectML unavailable, using the processor: %v", derr)
 		}
 	} else if gpu && r.appendCoreML != 0 {
 		if r.coreml(*opts) == nil {
 			dev = "CoreML"
 		} else if st, _, _ := purego.SyscallN(r.appendCoreML, *opts, coremlFlagCreateMLProgram); r.status(st) == nil {
 			dev = "CoreML"
+		} else {
+			dev = "CPU (CoreML unavailable)"
+			log.Printf("depth3d: CoreML unavailable, using the processor")
 		}
+	} else if gpu && runtime.GOOS == "linux" {
+		dev = "CPU (no GPU support on Linux yet)"
 	}
 	s := &Session{r: r, H: h, W: w, in: cstr(inName), out: cstr(outName), Device: dev,
 		buf: make([]float32, 3*h*w), x: &runScratch{}, shape: [4]int64{1, 3, int64(h), int64(w)}}
