@@ -160,6 +160,53 @@ func SubExt(codec string) string {
 	return "srt"
 }
 
+// SubOut is one text track to write: the stream index, its codec and the file.
+type SubOut struct {
+	Index int
+	Codec string
+	Out   string
+}
+
+// ExtractSubs writes several text tracks of one video in ONE pass: ffmpeg reads the whole file to
+// collect a track (its packets are spread through it), so one pass for all of them, not one each --
+// for a 4K film on a network share that's minutes per pass.
+func (t *Tool) ExtractSubs(path string, subs []SubOut) error {
+	ff, _ := t.Paths()
+	if ff == "" {
+		return errors.New("ffmpeg not found")
+	}
+	if len(subs) == 0 {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
+	defer cancel()
+	args := []string{"-hide_banner", "-nostdin", "-v", "error", "-y", "-i", path}
+	for _, s := range subs {
+		ext := SubExt(s.Codec)
+		c := "srt"
+		if ext == "ass" {
+			c = "copy"
+		}
+		args = append(args, "-map", fmt.Sprintf("0:%d", s.Index), "-c:s", c, "-f", ext, s.Out+".part")
+	}
+	cmd := exec.CommandContext(ctx, ff, args...)
+	hideWindow(cmd)
+	var stderr bytes.Buffer
+	cmd.Stderr = &limited{&stderr, 2048}
+	err := cmd.Run()
+	for _, s := range subs {
+		if err != nil {
+			os.Remove(s.Out + ".part")
+		} else if e := os.Rename(s.Out+".part", s.Out); e != nil && err == nil {
+			err = e
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("%v: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return nil
+}
+
 // ExtractSub writes one text subtitle track to out. ffmpeg reads the whole file for it, so on a
 // big file over a network this takes a while -- callers cache the result.
 func (t *Tool) ExtractSub(path string, index int, codec, out string) error {

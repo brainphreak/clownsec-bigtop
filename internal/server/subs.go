@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"log"
 	"net/http"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/brainphreak/clownsec-bigtop/internal/library"
 	"github.com/brainphreak/clownsec-bigtop/internal/media"
@@ -129,7 +131,13 @@ func (s *Server) apiSubFile(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
-		f, err := s.embeddedSub(it, path, ts[list[n].track])
+		// a 3DS waits for this before playing: a little, not the minutes a big video can take
+		f, err := s.embeddedSub(it, path, ts[list[n].track], 8*time.Second)
+		if errors.Is(err, errSubsPending) {
+			w.Header().Set("Retry-After", "60")
+			http.Error(w, err.Error(), http.StatusServiceUnavailable)
+			return
+		}
 		if err != nil {
 			log.Printf("subtitles %s: %v", filepath.Base(path), err)
 			http.Error(w, "the subtitle track couldn't be read", http.StatusInternalServerError)

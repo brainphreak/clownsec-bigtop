@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/brainphreak/clownsec-bigtop/internal/library"
 	"github.com/brainphreak/clownsec-bigtop/internal/moflex"
@@ -95,7 +96,7 @@ func (s *Server) webSubCues(id, path string, n int) ([]cue, error) {
 		if it == nil || list[k].track >= len(ts) {
 			return nil, fmt.Errorf("no subtitle track %d", n)
 		}
-		f, err := s.embeddedSub(it, p, ts[list[k].track])
+		f, err := s.embeddedSub(it, p, ts[list[k].track], 20*time.Second)
 		if err != nil {
 			return nil, err
 		}

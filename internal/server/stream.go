@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/brainphreak/clownsec-bigtop/internal/library"
 	"github.com/brainphreak/clownsec-bigtop/internal/media"
@@ -324,44 +326,111 @@ func trackList(ts []library.Track, audio bool) []TrackOut {
 
 // ---- subtitle tracks inside the file, as files ----
 
-var subJobs = struct {
-	sync.Mutex
-	m map[string]*sync.Mutex
-}{m: map[string]*sync.Mutex{}}
+// A video's text tracks are extracted together, in one background pass (see media.ExtractSubs), one
+// video at a time (a network share serves one long read far better than several at once). Whoever
+// needs a track waits a little for it; a 3DS that can't wait plays without it this time and has it
+// the next time.
+type subJob struct {
+	done chan struct{}
+	err  error
+	at   time.Time
+}
 
-// embeddedSub returns the cached file for an item's text track, extracting it first if needed
-// (ffmpeg reads the whole video for that, so it's done once and kept).
-func (s *Server) embeddedSub(it *library.Item, path string, t library.Track) (string, error) {
-	dir := filepath.Join(s.DataDir, "subcache")
-	os.MkdirAll(dir, 0o755)
-	out := filepath.Join(dir, fmt.Sprintf("%s-%d-%d.%s", it.ID, it.MTime, t.Index, media.SubExt(t.Codec)))
-	subJobs.Lock()
-	mu := subJobs.m[out]
-	if mu == nil {
-		mu = &sync.Mutex{}
-		subJobs.m[out] = mu
+var (
+	subMu   sync.Mutex
+	subJobs = map[string]*subJob{} // by item and file version
+	subSlot = make(chan struct{}, 1)
+)
+
+// errSubsPending: the video's subtitles are still being read.
+var errSubsPending = errors.New("the subtitles are still being read from the video")
+
+func (s *Server) subPath(it *library.Item, t library.Track) string {
+	return filepath.Join(s.DataDir, "subcache", fmt.Sprintf("%s-%d-%d.%s", it.ID, it.MTime, t.Index, media.SubExt(t.Codec)))
+}
+
+// startSubs: the background extraction of an item's text tracks not cached yet (nil = all there).
+func (s *Server) startSubs(it *library.Item, m *library.Media, path string) *subJob {
+	if it == nil || !s.Media.Available() {
+		return nil
 	}
-	subJobs.Unlock()
-	mu.Lock()
-	defer mu.Unlock()
+	var want []media.SubOut
+	for _, t := range textSubs(m) {
+		if out := s.subPath(it, t); !isFile(out) {
+			want = append(want, media.SubOut{Index: t.Index, Codec: t.Codec, Out: out})
+		}
+	}
+	if len(want) == 0 {
+		return nil
+	}
+	key := fmt.Sprintf("%s-%d", it.ID, it.MTime)
+	subMu.Lock()
+	defer subMu.Unlock()
+	if j := subJobs[key]; j != nil {
+		select {
+		case <-j.done:
+			if j.err == nil || time.Since(j.at) < 10*time.Minute {
+				return j // finished (or failed recently: not again straight away)
+			}
+		default:
+			return j // running: join it
+		}
+	}
+	j := &subJob{done: make(chan struct{})}
+	subJobs[key] = j
+	os.MkdirAll(filepath.Join(s.DataDir, "subcache"), 0o755)
+	go func() {
+		subSlot <- struct{}{}
+		t0 := time.Now()
+		err := s.Media.ExtractSubs(path, want)
+		<-subSlot
+		if err != nil {
+			log.Printf("subtitles %s: %v", filepath.Base(path), err)
+		} else {
+			log.Printf("subtitles %s: %d track(s) read in %s", filepath.Base(path), len(want), time.Since(t0).Round(time.Second))
+		}
+		subMu.Lock()
+		j.err, j.at = err, time.Now()
+		subMu.Unlock()
+		close(j.done)
+	}()
+	return j
+}
+
+// embeddedSub: the cached file for an item's text track; if it isn't extracted yet, the extraction is
+// started (or joined) and waited for up to wait -- then errSubsPending.
+func (s *Server) embeddedSub(it *library.Item, path string, t library.Track, wait time.Duration) (string, error) {
+	out := s.subPath(it, t)
 	if isFile(out) {
 		return out, nil
 	}
-	return out, s.Media.ExtractSub(path, t.Index, t.Codec, out)
+	_, m, _ := s.mediaOf(it.ID)
+	j := s.startSubs(it, m, path)
+	if j == nil {
+		if isFile(out) {
+			return out, nil
+		}
+		return "", errors.New("the subtitle track couldn't be read")
+	}
+	select {
+	case <-j.done:
+		if isFile(out) {
+			return out, nil
+		}
+		if j.err != nil {
+			return "", j.err
+		}
+		return "", errors.New("the subtitle track couldn't be read")
+	case <-time.After(wait):
+		return "", errSubsPending
+	}
 }
 
-// prefetchSubs extracts an item's text tracks in the background when the 3DS opens its page,
-// so they're ready by the time Play is pressed.
+// prefetchSubs starts reading an item's text tracks when the 3DS opens its page, so they may be
+// ready by the time Play is pressed.
 func (s *Server) prefetchSubs(id string) {
-	if !s.Media.Available() {
-		return
-	}
 	it, m, path := s.mediaOf(id)
-	for _, t := range textSubs(m) {
-		if _, err := s.embeddedSub(it, path, t); err != nil {
-			log.Printf("subtitles %s #%d: %v", filepath.Base(path), t.Index, err)
-		}
-	}
+	s.startSubs(it, m, path)
 }
 
 func isFile(p string) bool { st, err := os.Stat(p); return err == nil && !st.IsDir() }
