@@ -1337,7 +1337,10 @@ function menu3d() {
     lsSet('bt.src.' + P.id, b.dataset.s || null);
     // an MP4's layout decides how Big Top shapes the picture: a new stream from here
     const it = libData.items.find(x => x.id === P.id);
-    if (it && !it.moflex) start(now()); else apply();
+    if (it && !it.moflex) { // a new stream; the menu shows the choice now and what the stream is once it answers
+      menu3d();
+      start(now()).then(() => { if (!$('#pmenu').hidden) menu3d(); });
+    } else apply();
   });
   $('#pswap').onchange = ev => { lsSet('bt.swap.' + P.id, ev.target.checked ? '1' : null); if (P.sess && P.sess.baked) start(now()); };
 }
