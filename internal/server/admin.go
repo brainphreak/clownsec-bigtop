@@ -130,7 +130,7 @@ func (s *Server) adState(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		libs = append(libs, map[string]any{"id": l.ID, "name": l.Name, "folders": l.Folders, "videos": n, "missing": miss})
+		libs = append(libs, map[string]any{"id": l.ID, "name": l.Name, "folders": l.Folders, "type": l.Type, "videos": n, "missing": miss})
 	}
 	s.Store.RUnlock()
 	writeJSON(w, map[string]any{
@@ -244,6 +244,7 @@ func (s *Server) adSettings(w http.ResponseWriter, r *http.Request) {
 type libIn struct {
 	Name    string   `json:"name"`
 	Folders []string `json:"folders"`
+	Type    string   `json:"type"` // "" mixed, "tv", "movies"
 }
 
 func (in *libIn) check() string {
@@ -282,7 +283,7 @@ func (s *Server) adAddLibrary(w http.ResponseWriter, r *http.Request) {
 	}
 	s.Store.Lock()
 	id := library.ShowID("lib", in.Name+time.Now().String())[:8]
-	s.Store.DB.Libraries = append(s.Store.DB.Libraries, &library.Library{ID: id, Name: in.Name, Folders: in.Folders})
+	s.Store.DB.Libraries = append(s.Store.DB.Libraries, &library.Library{ID: id, Name: in.Name, Folders: in.Folders, Type: library.LibType(in.Type)})
 	s.Store.Unlock()
 	s.Store.Save()
 	s.Scanner.Start(false)
@@ -302,7 +303,7 @@ func (s *Server) adEditLibrary(w http.ResponseWriter, r *http.Request) {
 	s.Store.Lock()
 	l := s.Store.Lib(r.PathValue("id"))
 	if l != nil {
-		l.Name, l.Folders = in.Name, in.Folders
+		l.Name, l.Folders, l.Type = in.Name, in.Folders, library.LibType(in.Type)
 	}
 	s.Store.Unlock()
 	if l == nil {

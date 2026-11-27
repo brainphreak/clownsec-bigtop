@@ -242,14 +242,25 @@ on your network (open `http://<the Big Top computer's address>:32500/`).
 ## Libraries and scanning
 
 A **library** is a name plus one or more folders — for example "Movies", "3D Movies" or "Cartoons".
-A library can hold movies and TV shows together; Big Top tells them apart by name.
+Each library has a **type** (set when you add it, or with **Edit**):
+
+- **Mixed** (the default) — movies and TV shows together; Big Top tells them apart by file name.
+- **TV shows** — one folder per show (`TV\Show Name\Season 1\…`). Every video is an episode of the
+  show whose folder it is in, whatever its name looks like, and is never matched to a film. Season
+  folders (`Season 5`, `S10`, `Series 3`, `Specials`) give the season; the episode number is read
+  from names like `S05E20`, `6x19`, `725` (season 7 episode 25), `Episode 28`, `Ep. 45`,
+  `Show - 56 - Title`, `5of9` or `[3x22]`. A video with no number it can read is still listed under
+  its show (with the specials, or in its season folder's season).
+- **Movies** — nothing in it is taken for an episode, even with `S01E02` in its name.
+
+Changing a library's type reads its files again on the next scan (started straight away).
 
 - **Add a library** in the setup page, name it (that's what the 3DS shows) and pick its folders with
   the folder browser (drives and network shares included).
 - **Subfolders are included.** Organise the folders however you like; the folder structure doesn't
   decide anything (except that a subtitle file must sit next to its video).
-- Skipped: hidden folders (`.something`), `$RECYCLE.BIN`, `System Volume Information`, `@eaDir`, and
-  macOS `._` files.
+- Skipped: hidden folders (`.something`), `$RECYCLE.BIN`, `System Volume Information`, `@eaDir`,
+  macOS `._` files, and release `sample` clips under 300 MB.
 - Big Top **scans on start, every 30 minutes, and when you press Scan for new videos.** Unchanged
   files cost almost nothing to rescan.
 - **Moved or renamed files keep their info and watch history** — a file is recognised by its size
@@ -281,7 +292,8 @@ so is what the moflex encoder appends (`Lrf Full Sbs_400x240_1400kbps_23.976fps_
 
 ### TV episodes
 
-Any of these, with the show's name first:
+In a **TV shows** library the show's folder names the show (see [Libraries](#libraries-and-scanning));
+in a mixed library, any of these, with the show's name first:
 
 ```
 Show - S01E02 - Episode Title.moflex        Aeon Flux (1991) - S02e01 - Gravity.moflex

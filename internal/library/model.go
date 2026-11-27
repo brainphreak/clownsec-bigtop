@@ -4,14 +4,29 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
-// Library is a named set of folders (like a Plex library). Movies and TV episodes can share one.
+// Library is a named set of folders (like a Plex library). Type says what it holds (tvname.go):
+// "" mixed -- movies and TV episodes share it and the file names decide; "tv"; "movies".
 type Library struct {
 	ID      string   `json:"id"`
 	Name    string   `json:"name"`
 	Folders []string `json:"folders"`
+	Type    string   `json:"type,omitempty"`
+}
+
+// NameKey: how a library's files are read -- an item read another way (the type changed, or the
+// TV name rules did) is identified again on the next scan. Mixed libraries keep "".
+func (l *Library) NameKey() string {
+	switch LibType(l.Type) {
+	case TypeTV:
+		return "tv" + strconv.Itoa(TVNameVer)
+	case TypeMovies:
+		return "movies"
+	}
+	return ""
 }
 
 // Info is one layer of metadata. The scanner fills Detected from the file (super moflex trailer,
@@ -29,7 +44,8 @@ type Info struct {
 	Season   int    `json:"season,omitempty"`
 	Episode  int    `json:"episode,omitempty"`
 	EpTitle  string `json:"epTitle,omitempty"`
-	Kind     string `json:"kind,omitempty"` // not an episode: "movie", "short", "musicvideo" ("" = movie)
+	Kind     string `json:"kind,omitempty"`   // not an episode: "movie", "short", "musicvideo" ("" = movie)
+	InShow   bool   `json:"inShow,omitempty"` // a TV library's file: its show's even with no S/E number
 }
 
 // Kinds a title can be (TV episodes are grouped into shows instead).
@@ -122,6 +138,8 @@ type Item struct {
 	// whatever came of it -- a miss isn't asked again every scan)
 	TMDB    int `json:"tmdb,omitempty"`
 	TmdbVer int `json:"tmdbv,omitempty"`
+	// Named: the library's NameKey this file was identified under
+	Named string `json:"named,omitempty"`
 }
 
 // Media is a non-moflex file's streams, as ffprobe reports them. Big Top transcodes these to the
@@ -170,10 +188,11 @@ func IsMoflex(path string) bool { return strings.EqualFold(filepath.Ext(path), "
 func (it *Item) Info() Info { return over(it.Detected, it.Edit) }
 
 // IsEpisode: an item is a TV episode once it has a show and a season or episode number
-// (a special can be episode 0 of a season, or any episode of season 0).
+// (a special can be episode 0 of a season, or any episode of season 0). A TV library's file with
+// no number it could read is still its show's (InShow), listed with the specials.
 func (it *Item) IsEpisode() bool {
 	in := it.Info()
-	return in.Show != "" && (in.Season > 0 || in.Episode > 0)
+	return in.Show != "" && (in.Season > 0 || in.Episode > 0 || in.InShow)
 }
 
 // Show groups episodes. Its id comes from the library + show title, so it is stable.

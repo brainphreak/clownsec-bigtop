@@ -356,7 +356,7 @@ function renderLibs() {
   } else {
     box.innerHTML = state.libraries.map(l => `
       <div class="card lib">
-        <div class="grow"><div class="name">${esc(l.name)}</div>
+        <div class="grow"><div class="name">${esc(l.name)}${l.type === 'tv' ? ' <span class="pill">TV shows</span>' : l.type === 'movies' ? ' <span class="pill">Movies</span>' : ''}</div>
           <div class="folders">${l.folders.map(esc).join('<br>')}</div></div>
         <span class="pill">${l.videos} videos${l.missing ? ` · ${l.missing} missing` : ''}</span>
         <button class="small" data-edit="${l.id}">Edit</button>
@@ -661,6 +661,16 @@ function field(id, labelText, value, placeholder, type = 'text') {
 function libDialog(lib) {
   const folders = lib ? [...lib.folders] : [];
   let name = lib ? lib.name : '', step = lib ? 'edit' : 'folders', at = '';
+  let ltype = lib ? (lib.type || '') : '';
+  const typeField = () => `<label for="ltype">What it holds</label>
+      <select id="ltype">
+        <option value="" ${ltype === '' ? 'selected' : ''}>Mixed — movies and TV shows (the file names decide)</option>
+        <option value="tv" ${ltype === 'tv' ? 'selected' : ''}>TV shows — one folder per show</option>
+        <option value="movies" ${ltype === 'movies' ? 'selected' : ''}>Movies only</option>
+      </select>
+      <div class="hint">TV shows: every video is an episode of the show whose folder it is in
+        (<i>Show Name\\Season 1\\…</i>), whatever its name looks like, and is never matched to a film.
+        Movies only: nothing in it is taken for an episode.</div>`;
   const base = p => p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p;
   const folderList = () => `<div id="flist">${folders.map((f, i) => `<div class="row" style="margin:4px 0"><span style="overflow-wrap:anywhere">${esc(f)}</span>
        <button class="small" style="flex:none" data-rm="${i}">Remove</button></div>`).join('') || '<div class="hint">None yet — browse to a folder and press “Add this folder”.</div>'}</div>`;
@@ -668,13 +678,14 @@ function libDialog(lib) {
     if (step === 'name') open(`
       <h3>Add a library — name it</h3>
       ${field('lname', 'Name (what the 3DS shows)', name, 'Movies, 3D Movies, Cartoons…')}
+      ${typeField()}
       <label>Folders</label>${folders.map(f => `<div class="hint" style="overflow-wrap:anywhere">${esc(f)}</div>`).join('')}
       <div class="err" id="lerr"></div>
       <div class="actions"><button id="lback" style="margin-right:auto">Back</button>
         <button id="lcancel">Cancel</button><button class="primary" id="lsave">Add and scan</button></div>`);
     else open(`
       <h3>${lib ? 'Edit library' : 'Add a library — choose its folders'}</h3>
-      ${lib ? field('lname', 'Name (what the 3DS shows)', name, 'Movies, 3D Movies, Cartoons…') : ''}
+      ${lib ? field('lname', 'Name (what the 3DS shows)', name, 'Movies, 3D Movies, Cartoons…') + typeField() : ''}
       <label>Folders</label>${folderList()}
       <div id="browser"></div>
       <div class="err" id="lerr"></div>
@@ -688,6 +699,7 @@ function libDialog(lib) {
   };
   const hook = () => {
     const ln = $('#lname'); if (ln) ln.oninput = () => { name = ln.value; };
+    const lt = $('#ltype'); if (lt) lt.onchange = () => { ltype = lt.value; };
     const fl = $('#flist');
     if (fl) fl.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { folders.splice(+b.dataset.rm, 1); draw(); });
     $('#lcancel').onclick = close;
@@ -704,7 +716,7 @@ function libDialog(lib) {
     };
     if ($('#lsave')) $('#lsave').onclick = async () => {
       try {
-        const body = { name, folders };
+        const body = { name, folders, type: ltype };
         if (lib) await api('PUT', `/admin/api/libraries/${lib.id}`, body);
         else { const r = await api('POST', '/admin/api/libraries', body); curLib = r.id; }
         close(); refresh(); poll();

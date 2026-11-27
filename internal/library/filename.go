@@ -14,6 +14,7 @@ type Parsed struct {
 	Season  int
 	Episode int  // 0 is a special ("S04E00"), as is season 0 ("S00E05")
 	Marked  bool // the name had an episode marker (S01E02, 1x02, 1-02)
+	InShow  bool // a TV library's file: an episode of its folder's show even with no number (S00E00)
 	EpTitle string
 	Is3D    int // 1 = the name says 3D, 0 = says nothing
 	Layout  string
@@ -21,7 +22,7 @@ type Parsed struct {
 
 // IsEpisode: the name marks an episode. Episode 0 (S04E00) and season 0 (S00E05) are specials,
 // still episodes of the show; only "S00E00" says nothing.
-func (p Parsed) IsEpisode() bool { return p.Marked && (p.Season > 0 || p.Episode > 0) }
+func (p Parsed) IsEpisode() bool { return p.Marked && (p.InShow || p.Season > 0 || p.Episode > 0) }
 
 var (
 	// what the moflex encoder appends: " Lrf Full Sbs_400x240_1400kbps_23.976fps_2pass"
@@ -66,8 +67,13 @@ func NameLayout(name string) (int, string) {
 	return 0, ""
 }
 
+// ParseMovieName: ParseName for a movies library -- an "S01E02" in the name is just part of the title.
+func ParseMovieName(path string) Parsed { return parseName(path, false) }
+
 // ParseName reads title / year / episode / 3D hints out of a video file name.
-func ParseName(path string) Parsed {
+func ParseName(path string) Parsed { return parseName(path, true) }
+
+func parseName(path string, episodes bool) Parsed {
 	name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	var p Parsed
 	// the encoder's tail: its "Full Sbs" counts, its "Lr" / "Lrf" does not (2D files have it too)
@@ -78,7 +84,7 @@ func ParseName(path string) Parsed {
 	name = reSbsTag.ReplaceAllString(name, " ")
 
 	// an episode: the show is what comes before the marker, the episode title what comes after
-	if m := firstMatch(name, reSE, reNxNN, reDashNum); m != nil {
+	if m := firstMatch(name, reSE, reNxNN, reDashNum); m != nil && episodes {
 		p.Season, _ = strconv.Atoi(name[m[2]:m[3]])
 		p.Episode, _ = strconv.Atoi(name[m[4]:m[5]])
 		p.Marked = true

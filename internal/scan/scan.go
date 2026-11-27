@@ -11,6 +11,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -49,6 +50,7 @@ type Scanner struct {
 	DataDir string
 
 	run    sync.Mutex // one scan at a time
+	again  bool       // asked to scan while one ran: once more when it ends (a library changed)
 	mu     sync.Mutex
 	status Status
 	tmdb   *tmdb.Client // nil = TMDB off
@@ -90,18 +92,32 @@ func (sc *Scanner) set(f func(*Status)) {
 // info again (after a catalog update, or to pick up edits to the files' trailers).
 func (sc *Scanner) Start(refresh bool) bool {
 	if !sc.run.TryLock() {
+		sc.mu.Lock()
+		sc.again = true
+		sc.mu.Unlock()
 		return false
 	}
 	sc.set(func(s *Status) { *s = Status{Running: true, Last: s.Last} })
 	go func() {
 		defer sc.run.Unlock()
-		err := sc.scanAll(refresh)
-		sc.set(func(s *Status) {
-			s.Running, s.Current, s.Library, s.Last = false, "", "", time.Now().Unix()
-			if err != nil {
-				s.Error = err.Error()
+		for {
+			err := sc.scanAll(refresh)
+			sc.mu.Lock()
+			again := sc.again
+			sc.again = false
+			sc.mu.Unlock()
+			if !again {
+				sc.set(func(s *Status) {
+					s.Running, s.Current, s.Library, s.Last = false, "", "", time.Now().Unix()
+					if err != nil {
+						s.Error = err.Error()
+					}
+				})
+				return
 			}
-		})
+			refresh = false
+			sc.set(func(s *Status) { *s = Status{Running: true, Last: s.Last} })
+		}
 	}()
 	return true
 }
@@ -127,6 +143,8 @@ type found struct {
 	mtime int64
 }
 
+var reSample = regexp.MustCompile(`(?i)(^|[\s._-])sample([\s._-]|$)`)
+
 func walk(folders []string) []found {
 	var out []found
 	for _, root := range folders {
@@ -144,6 +162,11 @@ func walk(folders []string) []found {
 			}
 			if strings.HasPrefix(name, "._") || !Extensions[strings.ToLower(filepath.Ext(name))] {
 				return nil
+			}
+			if reSample.MatchString(name) { // a release's "sample" clip (Plex skips them too)
+				if fi, err := d.Info(); err == nil && fi.Size() < 300<<20 {
+					return nil
+				}
 			}
 			fi, err := d.Info()
 			if err == nil && d.Type()&fs.ModeSymlink != 0 {
@@ -209,6 +232,7 @@ func (sc *Scanner) scanLib(lib *library.Library, refresh bool) {
 		sc.set(func(s *Status) { s.Current = filepath.Base(f.path) })
 		it := byPath[f.path]
 		unchanged := it != nil && it.Size == f.size && it.MTime == f.mtime
+		named := lib.NameKey()
 		if !unchanged {
 			fp, err := fingerprint(f.path, f.size)
 			if err != nil {
@@ -233,12 +257,27 @@ func (sc *Scanner) scanLib(lib *library.Library, refresh bool) {
 			}
 			it.Lib, it.Path, it.Size, it.MTime, it.Fingerprint = lib.ID, f.path, f.size, f.mtime, fp
 			sc.Store.Unlock()
-			sc.identify(it)
+			sc.identify(it, lib)
+		} else if it.Named != named {
+			// the library's type changed (or the TV name rules did): read the file again. What a
+			// movie lookup said about a file that is now an episode goes (and the other way round).
+			sc.Store.Lock()
+			it.TmdbVer, it.TMDB = 0, 0
+			if it.PosterBy == "tmdb" || it.PosterBy == "catalog" {
+				it.Poster, it.PosterBy = "", ""
+			}
+			sc.Store.Unlock()
+			sc.identify(it, lib)
 		} else if refresh || (library.IsMoflex(it.Path) && !it.Checked3D) ||
 			(!library.IsMoflex(it.Path) && it.Rules3D < library.Rules3DVer) {
 			// a moflex from before Big Top read 3D from the file itself, or another video from
 			// before the current 3D rules: once, for its 3D label and layout
-			sc.identify(it)
+			sc.identify(it, lib)
+		}
+		if it.Named != named {
+			sc.Store.Lock()
+			it.Named = named
+			sc.Store.Unlock()
 		}
 		if library.IsMoflex(it.Path) && !it.Checked3D {
 			sc.Store.Lock()
@@ -279,8 +318,17 @@ func hashID(parts ...string) string {
 
 // identify works out a file's info: file name, then the catalog, then the super moflex trailer
 // (each later source wins where it has the field). The user's edits live apart and are untouched.
-func (sc *Scanner) identify(it *library.Item) {
-	p := library.ParseName(it.Path)
+func (sc *Scanner) identify(it *library.Item, lib *library.Library) {
+	lt := library.LibType(lib.Type)
+	var p library.Parsed
+	switch lt {
+	case library.TypeTV: // the show is the folder; every file is one of its episodes
+		p = library.ParseTV(it.Path, lib.Folders)
+	case library.TypeMovies:
+		p = library.ParseMovieName(it.Path)
+	default:
+		p = library.ParseName(it.Path)
+	}
 	det := library.Info{Title: p.Title, Year: p.Year}
 	if p.Is3D == 1 {
 		det.Is3D = "3d"
@@ -293,7 +341,7 @@ func (sc *Scanner) identify(it *library.Item) {
 	}
 	if p.IsEpisode() {
 		det = library.Info{Show: p.Title, ShowYear: p.Year, Season: p.Season, Episode: p.Episode,
-			EpTitle: p.EpTitle, Title: p.EpTitle, Is3D: det.Is3D}
+			EpTitle: p.EpTitle, Title: p.EpTitle, Is3D: det.Is3D, InShow: p.InShow}
 	}
 	source := "filename"
 	var catID, catArt string
@@ -338,9 +386,18 @@ func (sc *Scanner) identify(it *library.Item) {
 		// an episode when its shelf is TV Shows or its name says SxxEyy.
 		kind := strings.ToLower(sup.Field("kind"))
 		isEp := kind == "episode" || (kind == "" && (strings.EqualFold(sup.Field("category"), "TV Shows") || p.IsEpisode()))
+		switch lt { // the library's type beats the file's own word
+		case library.TypeTV:
+			isEp = true
+		case library.TypeMovies:
+			isEp = false
+		}
 		if isEp {
 			if !p.IsEpisode() { // the name says nothing (renamed): the file's own info is all there is
 				det = library.Info{Is3D: det.Is3D}
+			}
+			if lt == library.TypeTV {
+				det.InShow = true
 			}
 			if t := sup.Field("title"); t != "" {
 				det.Show = t
@@ -604,8 +661,10 @@ func (sc *Scanner) buildShows(lib *library.Library) {
 // catalog info back; this takes it off again).
 func (sc *Scanner) buildGroups(libs []*library.Library) {
 	roots := map[string][]string{}
+	tv := map[string]bool{}
 	for _, l := range libs {
 		roots[l.ID] = l.Folders
+		tv[l.ID] = library.LibType(l.Type) == library.TypeTV
 	}
 	sc.Store.Lock()
 	defer sc.Store.Unlock()
@@ -614,6 +673,10 @@ func (sc *Scanner) buildGroups(libs []*library.Library) {
 	hasExtras := map[string]bool{}
 	for _, it := range sc.Store.DB.Items {
 		if it.Missing != 0 {
+			continue
+		}
+		if tv[it.Lib] { // a TV library's "Extras" are its shows' specials, not a film's extras
+			it.Extra, it.Group = "", ""
 			continue
 		}
 		k, t, d := library.ExtraOf(it.Path, roots[it.Lib])
@@ -668,6 +731,9 @@ func (sc *Scanner) tmdbFill(it *library.Item, lib *library.Library) {
 	}
 	if k, _, _ := library.ExtraOf(path, lib.Folders); k != "" {
 		return // an extra: its own name, not a film
+	}
+	if library.LibType(lib.Type) == library.TypeTV {
+		return // a TV library holds no films (its shows get TMDB's info in buildShows)
 	}
 	sc.set(func(s *Status) { s.Current = "TMDB: " + in.Title })
 	id, tv, err := 0, false, error(nil)

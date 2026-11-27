@@ -489,7 +489,10 @@ func (s *Server) episodes(sid, client string) []*library.Item {
 		if a.Season != b.Season {
 			return seasonOrder(a.Season) < seasonOrder(b.Season)
 		}
-		return a.Episode < b.Episode
+		if a.Episode != b.Episode {
+			return a.Episode < b.Episode
+		}
+		return eps[i].Path < eps[j].Path // unnumbered ones (a TV library's "Extras"): by file name
 	})
 	return eps
 }
